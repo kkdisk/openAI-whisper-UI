@@ -212,14 +212,23 @@ def create_app(settings: Settings | None = None, manager: JobManager | None = No
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await pending
             if handle is not None:
-                await asyncio.to_thread(handle.close)
-            await asyncio.to_thread(manager.end_upload, job_id)
-            if failure is not None:
-                code = failure.code if isinstance(failure, AppError) else "upload_failed"
-                message = (
-                    failure.message if isinstance(failure, AppError) else "上傳中斷或磁碟寫入失敗。"
-                )
-                await asyncio.to_thread(manager.finish, job_id, Status.FAILED, message, code)
+                try:
+                    await asyncio.to_thread(handle.close)
+                except Exception as exc:
+                    # close 也可能在 flush 時失敗；仍須釋放 receiving 及活動槽位。
+                    if failure is None:
+                        failure = exc
+            try:
+                await asyncio.to_thread(manager.end_upload, job_id)
+            finally:
+                if failure is not None:
+                    code = failure.code if isinstance(failure, AppError) else "upload_failed"
+                    message = (
+                        failure.message
+                        if isinstance(failure, AppError)
+                        else "上傳中斷或磁碟寫入失敗。"
+                    )
+                    await asyncio.to_thread(manager.finish, job_id, Status.FAILED, message, code)
         if failure is not None:
             if isinstance(failure, AppError):
                 raise failure
@@ -375,8 +384,15 @@ def main():
     try:
         print("本機逐字稿工具：http://127.0.0.1:8000　停止服務請按 Ctrl+C。")
         server.run(sockets=[sock])
+    except KeyboardInterrupt:
+        # Python 3.10 的 Uvicorn 相容層會在正常關機後重新拋出 SIGINT。
+        print("本機逐字稿服務已停止。")
     finally:
-        sock.close()
+        # 也涵蓋 lifespan 尚未開始就中斷的情況；close 必須可重複呼叫。
+        try:
+            app.state.manager.close()
+        finally:
+            sock.close()
 
 
 if __name__ == "__main__":

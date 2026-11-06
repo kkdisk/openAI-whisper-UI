@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.config import ModelName
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -35,7 +37,7 @@ class JobRequest(BaseModel):
     meeting_date: str = Field(default="", max_length=100)
     participants: str = Field(default="", max_length=2000)
     terms: str = Field(default="", max_length=4000)
-    model: Literal["base", "small", "medium"] = "small"
+    model: ModelName = "small"
     language: Literal["zh", "auto", "en"] = "zh"
     cpu_threads: Literal[4, 6, 8] = 4
     traditional: bool = True

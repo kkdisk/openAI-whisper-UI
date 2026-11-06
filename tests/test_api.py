@@ -148,3 +148,75 @@ def test_json_size_limit(client):
         "/api/jobs", content=b"x" * 65537, headers={"Content-Type": "application/json"}
     )
     assert response.status_code == 413
+
+
+def test_turbo_model_api_and_preparation_gate(client):
+    import json
+
+    from app.config import MODEL_REPOS
+
+    c, manager = client
+    manager.check_model = True
+    rows = c.get("/api/models").json()
+    assert not next(row for row in rows if row["name"] == "large-v3-turbo")["ready"]
+    response = new(c, model="large-v3-turbo")
+    assert response.status_code == 400
+    assert response.json()["code"] == "model_missing"
+    assert manager.active is None
+    directory = manager.settings.models_dir / "large-v3-turbo"
+    directory.mkdir(parents=True)
+    for name in ("model.bin", "config.json", "tokenizer.json", "vocabulary.txt"):
+        (directory / name).write_text("{}", encoding="utf-8")
+    (directory / "ready.json").write_text(
+        json.dumps(
+            {
+                "repo": MODEL_REPOS["large-v3-turbo"],
+                "revision": "b" * 40,
+            }
+        ),
+        encoding="utf-8",
+    )
+    rows = c.get("/api/models").json()
+    assert next(row for row in rows if row["name"] == "large-v3-turbo")["ready"]
+    response = new(c, model="large-v3-turbo")
+    assert response.status_code == 201
+    assert response.json()["request"]["model"] == "large-v3-turbo"
+
+
+@pytest.mark.parametrize("write_failure", [False, True])
+def test_upload_close_failure_releases_slot(client, monkeypatch, write_failure):
+    from pathlib import Path
+
+    c, manager = client
+    job_id = new(c).json()["job_id"]
+    real_open = Path.open
+
+    class BrokenClose:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def write(self, data):
+            if write_failure:
+                raise OSError(28, "simulated write failure")
+            return self.handle.write(data)
+
+        def close(self):
+            self.handle.close()
+            raise OSError(28, "simulated flush failure")
+
+    def open_media(path, *args, **kwargs):
+        handle = real_open(path, *args, **kwargs)
+        return BrokenClose(handle) if path.name == "media.upload" and args == ("xb",) else handle
+
+    monkeypatch.setattr(Path, "open", open_media)
+    response = c.put(
+        f"/api/jobs/{job_id}/media",
+        content=b"abc",
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "upload_failed"
+    assert manager.get(job_id).status == Status.FAILED
+    assert job_id not in manager.receiving and manager.active is None
+    assert not (manager.directory(job_id) / "media.upload").exists()
+    assert new(c).status_code == 201

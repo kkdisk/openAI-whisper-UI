@@ -5,6 +5,7 @@ const labels = {uploading:"上傳中",validating:"檢查媒體",loading_model:"�
 let csrf = "", selected = null, active = null, stream = null, xhr = null;
 let pendingRows = new Map();
 let rows = [], lastId = 0, generation = 0, modelsReady = false, historyOffset = 0;
+let activePollPending = false;
 function message(text="") { $("message").textContent = text; }
 function time(seconds) { if(!Number.isFinite(seconds)||seconds<0)return "未知"; const n=Math.round(seconds);return [Math.floor(n/3600),Math.floor(n/60)%60,n%60].map(x=>String(x).padStart(2,"0")).join(":"); }
 async function api(path, options={}) {
@@ -83,6 +84,18 @@ async function history(more=false){
   }
   historyOffset=offset+result.items.length;$("more").hidden=historyOffset>=result.total;
 }
+// 檢視歷史結果會關閉其餘 SSE；活動槽位仍需獨立更新，不改動目前預覽。
+async function refreshActive(){
+  if(!active||activePollPending)return;
+  const observed=active;activePollPending=true;
+  try{
+    const result=await api("/api/jobs?limit=1");
+    if(active!==observed)return;
+    active=result.active_id;updateButtons();
+    if(active!==observed)await history();
+  }catch{ /* 暫時離線時保留目前狀態，下次輪詢重試。 */ }
+  finally{activePollPending=false;}
+}
 $("form").onsubmit=async event=>{
   event.preventDefault();message();if(active)return;
   const file=$("file").files[0];if(!file)return;
@@ -115,7 +128,8 @@ async function init(){
   const models=await api("/api/models");$("model").replaceChildren();
   for(const model of models){const option=document.createElement("option");option.value=model.name;option.textContent=`${model.name} · ${model.ready?"已準備":"未準備"}`;option.disabled=!model.ready;$("model").append(option);}
   modelsReady=models.some(m=>m.ready);if(models.find(m=>m.name==="small").ready)$("model").value="small";
-  $("modelHelp").textContent=modelsReady?"small 為預設；medium 需實測品質與等待時間。":"尚無可用模型。請先依 README 執行 prepare_models.py，再重新整理頁面。";
+  $("modelHelp").textContent=modelsReady?"small 為預設；medium／large-v3-turbo 請先以短片段比較品質、耗時與記憶體。":"尚無可用模型。請先依 README 執行 prepare_models.py，再重新整理頁面。";
   await history();const latest=await api("/api/jobs/latest");if(latest)await selectJob(latest.job_id);updateButtons();
+  setInterval(refreshActive,2000);
 }
 init().catch(e=>message(e.message));

@@ -13,6 +13,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.config import Settings
+from app.formatter import CONVERSION
 from app.models import model_path
 from app.process_control import JobObject, stop_process, worker_entry
 from app.schemas import TERMINAL, AppError, JobMeta, JobRequest, Status, TranscriptSegment, now_iso
@@ -110,6 +111,10 @@ class JobManager:
                         good.extend(line)
                 if warnings:
                     path.write_bytes(good)
+            # 未完成任務可能因 JSONL 先於 metadata 落盤而多出完整片段；
+            # 已完成任務的片段數則必須與最後保存的快照一致。
+            if meta.status == Status.COMPLETED and len(rows) != meta.segment_count:
+                warnings.append("已保存片段數與完成紀錄不符，結果可能遺失，請核對內容。")
             if meta.status not in TERMINAL:
                 meta.status = Status.INTERRUPTED
             if warnings and meta.status == Status.COMPLETED:
@@ -141,7 +146,7 @@ class JobManager:
             meta = JobMeta(
                 job_id=uuid4().hex,
                 request=request,
-                conversion="s2t" if request.traditional else "none",
+                conversion=CONVERSION if request.traditional else "none",
             )
             self.directory(meta.job_id).mkdir()
             self.save(meta)

@@ -1,6 +1,6 @@
 [project]
 name = "local-meeting-transcriber"
-version = "0.1.0"
+version = "0.2.0"
 description = "本機離線會議逐字稿工具"
 requires-python = ">=3.10,<3.11"
 dependencies = [

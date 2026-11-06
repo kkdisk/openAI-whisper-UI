@@ -2,13 +2,17 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, get_args
 
 ROOT = Path(__file__).resolve().parent.parent
+ModelName = Literal["base", "small", "medium", "large-v3-turbo"]
+TRANSCRIPTION_MODELS = get_args(ModelName)
 MODEL_REPOS = {
     "tiny": "Systran/faster-whisper-tiny",
     "base": "Systran/faster-whisper-base",
     "small": "Systran/faster-whisper-small",
     "medium": "Systran/faster-whisper-medium",
+    "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
 }
 
 

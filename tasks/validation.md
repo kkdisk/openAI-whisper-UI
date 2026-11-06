@@ -103,3 +103,59 @@ Git 初始化時，本機 main 追蹤 `https://github.com/kkdisk/openAI-whisper-
 - 使用者截圖已確認本機頁面、轉錄進度及逐字稿預覽正常呈現；尚未因此推定所有取消／下載／恢復操作均通過人工接受。
 - R01 長錄音在交付前快照仍持續轉錄，已超過原失敗位置且無新錯誤；完整長檔、峰值記憶體、模型效能比較與人工辨識品質仍維持待驗證，不以本次 tag 代替這些驗收。
 - 沒有前端編譯或 EXE 打包產物；此版以 Python 原始碼、鎖檔與啟動腳本交付。commit／tag 推送不等同 GitHub Release 或 CI 通過。
+
+## R01 完成與下一階段規劃補記
+
+此補記取代前文 R01 仍執行中的快照。已重新讀取本機 metadata 與匯出 Markdown：狀態 completed，音軌約 108 分 7 秒，5,087 段，最後保存位置約 1:48:05，耗時 3,457.407 秒（約 57 分 37 秒），error_code 為空、warnings 為空。這證明程序跑到終態，不證明所有語音都被正確辨識；仍需原音末尾核對、資源量測與人工品質驗收。
+
+文字檢查觀察：
+
+- 時間戳未見倒退；片段字數中位數 4，3,400／5,087 段（約 66.8%）不超過 5 字。這是閱讀粒度統計，不是辨識錯誤率。
+- 01:25:05～01:25:14 有同一文字連續 10 次，原始辨識結果即存在，不是 Markdown 或繁體轉換產生；是否為幻覺或原音重複仍須回聽。
+- 共 88 段經繁體轉換改變；確認有「只有」轉成「隻有」的副作用，須與模型辨識問題分開處理。
+- 跨時間區間抽樣可見語意可疑的技術詞，但未建立人工參考稿，不能宣稱 CER／WER 或猜測正確人名、型號與詞彙。
+- 本紀錄只保留樣本代號、時間區間及非敏感統計，不收錄完整會議內容或原檔名稱。
+
+使用者已同意將上述品質問題、CPU／GPU 模型比較、pyannote 分離與人工姓名對應納入規劃。SPEC 第 13 節、plan 的 M6～M9、todo 的 T60～T90 均是新規劃，沒有安裝新依賴、下載新模型、修改程式或改變 v0.1.0 的既有行為。
+
+另依使用者要求中斷本工具的 app.main 程序，確認對應程序退出且 8000 無 listener；既有錄音與逐字稿保留。之後如重新啟動，埠與程序狀態需重新確認，本紀錄不代表即時狀態。
+
+## Ctrl+C 正常停止修復
+
+- 使用者回報的 traceback 發生於 Uvicorn 重送捕捉到的 SIGINT：Python 3.10 相容層使 KeyboardInterrupt 離開 server.run，並非該 traceback 證明模型轉錄失敗。
+- app.main 僅捕捉 KeyboardInterrupt，正常停止顯示繁體中文訊息，finally 再確認任務管理器關閉與 socket 釋放，涵蓋 lifespan 尚未啟動就中斷的情況。其他例外不因此被隱藏。
+- 新增清理呼叫回歸與獨立 Windows 子程序的真實 Uvicorn／SIGINT 整合測試：程序正常回傳 0，無 KeyboardInterrupt／Traceback。測試使用臨時資料及隨機可用埠，不操作使用者轉錄結果。
+- 本輪一般測試 **43 passed、1 skipped**（真實模型 opt-in 未重跑），Ruff、格式及差異檢查通過；既有 TestClient 第三方警告仍在。
+- CMD 的 `Terminate batch job (Y/N)?` 是批次中斷確認，仍可能出現，輸入 Y 即可；README 已補充，不宣稱程式能消除 CMD 自身提示。
+
+## Medium 準備復原與 turbo 候選
+
+- 使用者的 medium 下載已落盤，但 snapshot_download 結束階段曾出現例外；提供內容缺少最後的例外類別／訊息，原始原因尚不能確認。hf_xet 的 HTTP 回退提示本身不是錯誤。
+- medium 的必要檔案已依 HF 本機來源紀錄比對完整雜湊，revision 為 08e178d48790749d25932bbc082711ddcfdfbc4f。模型、tokenizer 與 VAD 的禁止連網載入已通過，已寫入 ready.json，模型清單確認可選；沒有重新下載權重，未宣稱真實語音辨識品質通過。
+- prepare_models.py 新增 --verify-only、序列下載及驗證成功後原子標記；檔案損毀、來源紀錄缺少／版本不同、載入失敗及下載失敗均有回歸覆蓋。最新一般測試 49 passed、1 skipped，Ruff／格式檢查通過；真實模型 opt-in 未重跑。
+- 下一階段模型矩陣加入 large-v3-turbo。官方模型卡支持其 decoder 精簡的設計，但本機尚未準備／實測 turbo，沒有更改 CPU 預設，也未移除 medium；原始錄音與模型比較內容仍只放本機。
+
+## Turbo 選項與五分鐘合成素材補記
+
+- turbo 原先只在規劃中，現已接入共享模型型別、UI 模型清單、API 請求及準備來源；未下載者仍反灰，不自動改用其他模型。
+- 本機 large-v3-turbo 來源 mobiuslabsgmbh/faster-whisper-large-v3-turbo，revision 0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf。下載、必要檔案雜湊與 CPU INT8／tokenizer／VAD 禁止連網載入通過，ready.json 已寫入；未做模型品質或 GPU 效能驗收。
+- 模型清單／schema 一致性與 API 未備妥拒絕、備妥後接受已有回歸測試。既有 small／medium 設定與歷史結果保留；運行中的服務需要重啟才能載入新的後端清單。
+- 依使用者要求產生 temp/mixed_zh_en_5min.wav，固定 300 秒、16 kHz、單聲道、16-bit PCM，9,600,044 bytes；峰值絕對振幅 30,855、削波樣本數 0。16 個中英交替區塊使用 Microsoft Hanhan Desktop／Microsoft Zira Desktop，語音速度 2，合成區塊共約 289.51 秒，區塊間隙約 0.62 秒。
+- 同名 .reference.txt 與 .json 包含參考內容、區塊時間及 SHA-256；檔案雜湊及內容一致性已核對。此為合成朗讀，不是真實會議，也不作字詞時間或自然說話者分離的人工標註。
+- scripts/create_test_audio.py 可重建素材，已存在 WAV 時拒絕覆蓋；不依賴雲端或新增語音套件。輸出只放忽略的 temp，不納入公開倉庫。
+
+## 審查修正驗證（2026-11-06）
+
+- 上傳原始串流的 close／flush 例外會轉成 upload_failed；仍執行 end_upload 及任務收尾。隔離回歸涵蓋單獨關閉失敗及寫入／關閉同時失敗，確認 receiving 清除、任務 failed、媒體副本刪除且可建立下一個任務。
+- 完成任務恢復時核對 JSONL 完整片段數與原 metadata，檔案遺失、空檔、完整行減少／增加、尾端不完整均標 interrupted 並提示；保留可讀片段與 partial 匯出。合法零片段仍可 completed；未完成任務允許 JSONL 先於 metadata 落盤。
+- 前端維持單一預覽 SSE，另在存在活動任務時每 2 秒查詢活動槽位。Node VM 情境測試涵蓋切換至歷史結果後背景完成、不覆蓋目前預覽、過期回應不覆蓋新任務、暫時離線可重試；尚未作實際瀏覽器人工接受。
+- 新任務記錄 s2t-conservative-v1：以 OpenCC 詞組結果作候選，只替換 STCharacters 中非繁體候選的簡體專用字，保留共用字及原始 raw_text。回歸涵蓋「是只有」、皇后／干涉／里程、開發／頭髮及英文型號。共用字不猜選，可能保留簡體慣用寫法；不自動重轉歷史逐字稿。
+- 全部一般測試 **66 passed、1 skipped**；其中 pytest 呼叫 Node，另有 3 個前端情境通過。Ruff、Python 格式、JavaScript 語法與 git diff --check 通過。既有 Starlette TestClient 的第三方棄用警告仍在。
+- 真實模型 opt-in 及五分鐘中英音檔本輪未重跑；這些修正不代表多語辨識品質問題已解決，也未 commit／tag／push。
+
+## v0.2.0 提交前檢查（2026-11-06）
+
+- 版本同步 pyproject.toml、uv.lock 及 README；新增 annotated tag v0.2.0，保留 v0.1.0 不移動。來源為 main，origin 為 https://github.com/kkdisk/openAI-whisper-UI.git。
+- 全部測試含明確啟用的本機 small 真實模型／短 MP4 離線轉錄：**67 passed**，沒有略過；既有 TestClient 第三方棄用警告 1 項。Node 的 3 個前端情境由 pytest 執行。
+- Ruff、Python 格式、JavaScript 語法與差異檢查通過。模型、音檔、轉錄結果及快取仍在忽略目錄，不納入提交。
+- 本版交付的是原始碼及文件，沒有打包 EXE、建立 GitHub Release 或執行 CI；未重跑五分鐘音檔品質比較，瀏覽器人工操作及 GPU／說話者分離驗收仍未完成。

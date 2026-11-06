@@ -2,6 +2,8 @@
 
 Windows 本機 Web UI，使用 faster-whisper CPU INT8 辨識中文及英文專有名詞。主要輸出帶時間戳 TXT 與附 AI 整理指示的 Markdown，另可下載 SRT。音檔及文字不會由本工具上傳外部服務。
 
+目前版本：**v0.2.0**。新增 large-v3-turbo 選項、模型離線驗證復原及五分鐘合成測試素材產生工具；修正停止服務、上傳失敗清理、結果恢復、歷史切換狀態與繁體轉換。中英混合辨識品質仍需回聽核對；GPU 與說話者分離尚未實作。
+
 ## 日常使用
 
 完成下方「首次安裝／重建環境」、備妥 `.venv` 與 `small` 模型後，可雙擊 `start.bat`，或在 PowerShell 執行（模型與虛擬環境不包含在 Git 倉庫內）：
@@ -20,6 +22,8 @@ Windows 本機 Web UI，使用 faster-whisper CPU INT8 辨識中文及英文專�
 檔案上限 4 GiB、音軌上限 120 分鐘，使用第一條音軌。這些限制可在 `app/config.py` 調整；媒體編碼是否可解碼仍需實際檢查。專有名詞用來提示模型，不會強制替換；完整提示超過 200 tokens 會顯示縮短提示，字數不等於 token 數。
 
 關閉或重新整理瀏覽器不會停止轉錄。停止服務請在啟動視窗按 **Ctrl+C**，通常需數秒清理；再次使用可重新啟動。8000 埠被其他服務占用時會報錯，不會把其他服務當成本工具。
+
+正常 Ctrl+C 停止會顯示「本機逐字稿服務已停止」，不印 KeyboardInterrupt traceback。CMD 仍可能顯示 `Terminate batch job (Y/N)?`，這是批次檔的中斷確認，輸入 `Y` 即可結束；不是轉錄模型失敗。
 
 若服務已在執行，直接開啟 `http://127.0.0.1:8000` 使用即可，不必重複執行啟動檔。`start.bat` 使用無 BOM 的 ASCII 與 CRLF 換行，Git 已設定批次檔保留 CRLF，避免 CMD 將編碼或換行解讀成指令。
 
@@ -55,7 +59,21 @@ uv sync --locked --group dev
 .\.venv\Scripts\python.exe scripts\prepare_models.py --model small --revision 536b0662742c02347bc0e980a01041f333bce120
 ```
 
-需要其他模型時將 `--model` 改成 `base` 或 `medium`。模型準備期間請停止轉錄服務；不要同時更新正在使用的模型。日常 `start.bat` 不會執行安裝、更新或模型下載。
+需要其他模型時將 `--model` 改成 `base`、`medium` 或 `large-v3-turbo`。模型準備期間請停止轉錄服務；不要同時更新正在使用的模型。日常 `start.bat` 不會執行安裝、更新或模型下載。
+
+```powershell
+.\.venv\Scripts\python.exe scripts\prepare_models.py --model large-v3-turbo
+```
+
+UI 列出所有支援模型；未備妥的模型顯示「未準備」且不可選。新增模型支援的程式更新後，需停止／重新啟動服務並重新整理頁面。turbo 目前同樣使用 CPU INT8，不代表已加入 NVIDIA GPU 模式，也沒有本機加速倍數保證；長會議前先測短片段。
+
+如果下載進度到 100% 後發生例外，先保留 `models/`，不要刪掉重新下載。檔案及 HF 下載來源紀錄齊全時，可完全離線比對雜湊、載入模型與 VAD，再標記可用：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\prepare_models.py --model medium --verify-only
+```
+
+只在全部檢查通過後才寫入 `ready.json`；若版本不一致、缺少來源紀錄或雜湊不符，請再執行正常準備指令以重用／續傳既有下載，不能手動建立 ready.json 跳過驗證。`hf_xet` 未安裝的訊息代表改用一般 HTTP 下載，本身不是失敗原因；不必為了該提示額外安裝套件。
 
 使用 PyAV 附帶的 FFmpeg 函式庫，無需安裝全域 FFmpeg。若原生 DLL 載入失敗，請檢查 64 位元 Python 與 Windows Microsoft Visual C++ 執行期；不要以忽略 DLL 錯誤或自動下載模型作為回退。
 
@@ -86,6 +104,7 @@ uv pip install --python .venv\Scripts\python.exe --no-index --find-links wheelho
 - 意外關閉服務後，下次啟動會清理殘留媒體、將活動任務標為 interrupted。恢復的是已保存結果，不會接續推論。
 - 歷史結果保留到使用者在頁面確認刪除。`data/` 可能包含敏感會議資料，請依自己的保存需求清理；模型與資料均排除版本控制。
 - 繁體轉換、VAD 與專有名詞提示不能保證辨識正確；英文型號、數字、否定詞及決議需人工核對。
+- 新任務採保守繁體轉換（`s2t-conservative-v1`）：僅轉換簡體專用字，保留「只、后、干、里」等共用字，避免誤改既有繁體；不保證所有歧義詞都轉成預期寫法。既有結果不會自動重轉，仍可下載原始 TXT。
 - 第一版不辨識說話者、不產生摘要、不自動呼叫外部 AI，也不保證 60 分鐘錄音的處理時間。
 - SRT 允許零長度片段；若有非法時間只阻止 SRT 匯出，不影響 TXT／MD 保留內容。
 
@@ -108,3 +127,15 @@ uv run --no-sync pytest --real-model
 一般測試封鎖外部連線，允許 Windows asyncio 所需的 loopback socket。真實模型測試以 PyAV 產生 MP4／AAC，再清空 PATH 執行辨識。沒有素材／模型會標記 skip，不能算通過真實辨識驗收。使用者語音與測試輸出放在忽略的 `temp/`，不提交錄音內容。
 
 目前驗證結果、未完成項目及執行證據見 [tasks/validation.md](tasks/validation.md)；任務追蹤見 [tasks/todo.md](tasks/todo.md)。
+
+### 固定五分鐘中英測試素材
+
+Windows 已安裝繁體中文與英文語音時，可離線生成測試 WAV、對照文字與區塊時間／雜湊清單：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\create_test_audio.py
+```
+
+輸出於 temp/mixed_zh_en_5min.wav、同名 .reference.txt 與 .json。音訊固定 300 秒、16 kHz／單聲道／PCM 16-bit，涵蓋術語、型號、數字、單位、否定與承諾語句；已存在的 WAV 不覆蓋。比較模型時固定使用同一音檔並記錄 SHA-256。
+
+此素材是中文／英文兩種合成語音交替，不是自然多人會議，也不是精準說話者分離標註；數字口語讀法與參考文字需人工核對。通過合成測試不能取代 R01 等真實錄音驗收，所有音訊輸出維持排除 Git。

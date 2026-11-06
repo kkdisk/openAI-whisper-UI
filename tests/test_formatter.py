@@ -34,6 +34,25 @@ def test_traditional_and_raw():
     assert "會議 API" in export(meta, rows, "txt")
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("那個滑軌是只有單條的關係", "那個滑軌是只有單條的關係"),
+        ("皇后在后台，干涉里程", "皇后在后台，干涉里程"),
+        ("开发软件，头发很长", "開發軟件，頭髮很長"),
+        ("会议只有一台设备 API GLT-123 1.5V", "會議只有一台設備 API GLT-123 1.5V"),
+    ],
+)
+def test_conservative_conversion(source, expected):
+    assert convert_text(source) == expected
+    assert convert_text(source, False) == source
+    meta, rows = data()
+    rows[0].raw_text = source
+    rows[0].text = convert_text(source)
+    assert expected in export(meta, rows, "md")
+    assert source in export(meta, rows, "txt", True)
+
+
 @pytest.mark.parametrize(("start", "end"), [(0, 0), (1.00001, 1.00002)])
 def test_equal_srt(start, end):
     meta, rows = data(start, end)

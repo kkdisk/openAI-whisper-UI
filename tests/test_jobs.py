@@ -100,6 +100,53 @@ def test_restore_truncated_jsonl(tmp_path):
     assert (directory / "segments.jsonl").read_text("utf-8") == valid
 
 
+@pytest.mark.parametrize("damage", ["missing", "empty", "short", "extra", "partial"])
+def test_completed_restore_detects_lost_or_changed_segments(tmp_path, damage):
+    from app.formatter import export
+    from app.schemas import TranscriptSegment
+
+    manager = make(tmp_path)
+    meta = manager.create(request())
+    row = TranscriptSegment(segment_id=1, start_sec=0, end_sec=1, raw_text="API", text="API")
+    path = manager.directory(meta.job_id) / "segments.jsonl"
+    lines = [row.model_dump_json(), row.model_copy(update={"segment_id": 2}).model_dump_json()]
+    manager.metas[meta.job_id].segment_count = 2
+    manager.finish(meta.job_id, Status.COMPLETED)
+    if damage != "missing":
+        content = {
+            "empty": "",
+            "short": lines[0] + "\n",
+            "extra": "\n".join(lines + [row.model_copy(update={"segment_id": 3}).model_dump_json()])
+            + "\n",
+            "partial": lines[0] + '\n{"segment_id":',
+        }[damage]
+        path.write_text(content, encoding="utf-8")
+    restored = make(tmp_path)
+    result = restored.get(meta.job_id)
+    assert result.status == Status.INTERRUPTED
+    assert result.warnings and result.error
+    assert "不完整" in export(result, restored.segments[meta.job_id], "md")
+
+
+def test_completed_silence_and_unfinished_tail_restore(tmp_path):
+    from app.schemas import TranscriptSegment
+
+    manager = make(tmp_path)
+    silent = manager.create(request())
+    manager.finish(silent.job_id, Status.COMPLETED)
+    pending = manager.create(request())
+    row = TranscriptSegment(segment_id=1, start_sec=0, end_sec=1, raw_text="API", text="API")
+    (manager.directory(pending.job_id) / "segments.jsonl").write_text(
+        row.model_dump_json() + "\n", encoding="utf-8"
+    )
+    restored = make(tmp_path)
+    assert restored.get(silent.job_id).status == Status.COMPLETED
+    assert not restored.get(silent.job_id).warnings
+    assert restored.get(pending.job_id).status == Status.INTERRUPTED
+    assert restored.get(pending.job_id).segment_count == 1
+    assert not restored.get(pending.job_id).warnings
+
+
 def test_invalid_times_survive_persistence(tmp_path):
     from app.formatter import export
     from app.schemas import TranscriptSegment

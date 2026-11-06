@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from app.config import MODEL_REPOS, Settings
+from app.config import MODEL_REPOS, TRANSCRIPTION_MODELS, Settings
 from app.schemas import AppError
 
 
@@ -43,7 +43,7 @@ def model_path(settings: Settings, name: str, require_ready: bool = True) -> Pat
 
 def list_models(settings: Settings) -> list[dict]:
     rows = []
-    for name in ("base", "small", "medium"):
+    for name in TRANSCRIPTION_MODELS:
         try:
             model_path(settings, name)
             rows.append({"name": name, "ready": True, "message": "已準備"})

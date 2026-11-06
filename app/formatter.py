@@ -2,12 +2,25 @@
 
 import math
 import re
+from importlib.resources import files
 
 from opencc import OpenCC
 
 from app.schemas import AppError, JobMeta, Status, TranscriptSegment
 
 _converter = OpenCC("s2t")
+CONVERSION = "s2t-conservative-v1"
+# 只替換簡體專用字；共用字保留，避免詞組規則誤改已正確的繁體文字。
+_character_pairs = [
+    line.split("\t")
+    for line in files("opencc")
+    .joinpath("dictionary/STCharacters.txt")
+    .read_text("utf-8")
+    .splitlines()
+    if "\t" in line
+]
+_traditional_chars = set("".join(targets.replace(" ", "") for _, targets in _character_pairs))
+_simplified_only = {source for source, _ in _character_pairs if source not in _traditional_chars}
 MEETING_PROMPT = (
     "請僅根據下方逐字稿，整理討論重點、明確決議、待辦事項、負責人、期限與待確認問題。"
     "保留英文專有名詞，並為決議與待辦附來源時間戳。"
@@ -19,7 +32,14 @@ MEETING_PROMPT = (
 
 
 def convert_text(text: str, enabled: bool = True) -> str:
-    return _converter.convert(text) if enabled else text
+    if not enabled:
+        return text
+    converted = _converter.convert(text)
+    if len(converted) != len(text):
+        return "".join(_converter.convert(c) if c in _simplified_only else c for c in text)
+    return "".join(
+        new if old in _simplified_only else old for old, new in zip(text, converted, strict=True)
+    )
 
 
 def timestamp(seconds: float, srt: bool = False) -> str:
