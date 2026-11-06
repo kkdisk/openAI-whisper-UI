@@ -6,6 +6,11 @@ let csrf = "", selected = null, active = null, stream = null, xhr = null;
 let pendingRows = new Map();
 let rows = [], lastId = 0, generation = 0, modelsReady = false, historyOffset = 0;
 let activePollPending = false;
+let submitting = false;
+const workspaceStorageKey = "local-transcript.workspace-cleared";
+let workspaceCleared = false;
+try { workspaceCleared = sessionStorage.getItem(workspaceStorageKey) === "1"; } catch { /* 僅保留本次頁面的狀態。 */ }
+const emptyMark = $("transcript").querySelector?.(".empty-mark")?.cloneNode(true);
 function message(text="") { $("message").textContent = text; }
 function time(seconds) { if(!Number.isFinite(seconds)||seconds<0)return "未知"; const n=Math.round(seconds);return [Math.floor(n/3600),Math.floor(n/60)%60,n%60].map(x=>String(x).padStart(2,"0")).join(":"); }
 async function api(path, options={}) {
@@ -13,7 +18,51 @@ async function api(path, options={}) {
   if(!response.ok){let error;try{error=await response.json();}catch{error={message:"本機服務回應異常。"};}throw new Error(error.message);}
   return response.status===204?null:response.json();
 }
-function updateButtons(){ $("start").disabled=!!active||!modelsReady; $("cancel").disabled=!selected||selected.job_id!==active||selected.status==="cancelling"; }
+function canClearWorkspace(){ return !!selected&&terminal.has(selected.status)&&!active&&!submitting&&!xhr; }
+function updateButtons(){
+  $("start").disabled=!!active||submitting||!modelsReady;
+  $("cancel").disabled=!selected||selected.job_id!==active||selected.status==="cancelling";
+  $("clearWorkspace").disabled=!canClearWorkspace();
+  const hint=active||submitting||xhr?"有活動任務，請待完成或取消後再清除。":!selected?"請先開啟一份已結束的紀錄。":!terminal.has(selected.status)?"此任務尚未結束，暫時無法清除。":"只清空顯示，歷史結果保留。";
+  $("clearWorkspace").title=hint;$("clearWorkspaceHint").textContent=hint;
+}
+function rememberWorkspaceCleared(value){
+  workspaceCleared=value;
+  try { if(value)sessionStorage.setItem(workspaceStorageKey,"1");else sessionStorage.removeItem(workspaceStorageKey); } catch { /* 儲存受阻仍可清除目前畫面。 */ }
+}
+function resetWorkspace({cleared=false,deleted=false}={}){
+  ++generation;
+  if(stream){stream.close();stream=null;}
+  selected=null;rows=[];lastId=0;pendingRows.clear();
+  $("jobTitle").textContent="逐字稿";
+  $("progress").value=0;
+  $("status").textContent=cleared?"工作區已清除，結果仍保留於本機歷史。":deleted?"結果已刪除。":"選擇檔案，開始第一份會議逐字稿。";
+  $("timing").textContent="模型載入與解碼期間不顯示估計百分比。";
+  message();
+  const box=document.createElement("div");box.className="empty";
+  if(emptyMark)box.append(emptyMark.cloneNode(true));
+  const title=document.createElement("h3");title.textContent=cleared?"工作區已清除":deleted?"結果已刪除":"從一段錄音開始";
+  const detail=document.createElement("p");detail.textContent=cleared?"結果仍保留於本機歷史，選取紀錄即可重新開啟。":deleted?"請從本機歷史選擇其他紀錄。":"完成一段，就會在這裡留下帶時間戳的文字。";
+  box.append(title,detail);$("transcript").replaceChildren(box);
+  $("copy").disabled=true;
+  document.querySelectorAll("[data-format]").forEach(button=>button.disabled=true);
+  updateButtons();
+}
+function clearWorkspace(){
+  if(!canClearWorkspace())return false;
+  rememberWorkspaceCleared(true);
+  resetWorkspace({cleared:true});
+  $("transcript").focus?.();
+  return true;
+}
+async function restoreWorkspace(ticket=generation){
+  if(ticket!==generation)return;
+  if(workspaceCleared){resetWorkspace({cleared:true});return;}
+  try{
+    const latest=await api("/api/jobs/latest");
+    if(ticket===generation&&!workspaceCleared&&latest)await selectJob(latest.job_id);
+  }catch(error){if(ticket===generation&&!workspaceCleared)throw error;}
+}
 function showMeta(meta){
   selected=meta;
   if(!terminal.has(meta.status))active=meta.job_id;else if(active===meta.job_id)active=null;
@@ -46,9 +95,10 @@ function appendNext(row){
   node.append(stamp,text);$("transcript").append(node);$("copy").disabled=false;
 }
 async function selectJob(id){
+  rememberWorkspaceCleared(false);
   const ticket=++generation;
   if(stream)stream.close();
-  rows=[];lastId=0;pendingRows.clear();selected=null;updateButtons();document.querySelectorAll("[data-format]").forEach(b=>b.disabled=true);message();$("transcript").replaceChildren();
+  rows=[];lastId=0;pendingRows.clear();selected=null;updateButtons();$("copy").disabled=true;document.querySelectorAll("[data-format]").forEach(b=>b.disabled=true);message();$("transcript").replaceChildren();
   try{
     const meta=await api(`/api/jobs/${id}`);if(ticket!==generation)return;showMeta(meta);
     // 先接收事件，再補查快照；同一份片段依 ID 去重。
@@ -79,7 +129,7 @@ async function history(more=false){
     name.textContent=meta.request.title||meta.request.source_name;
     const detail=document.createElement("small");detail.textContent=`${new Date(meta.created_at).toLocaleString()} · ${labels[meta.status]} · ${time(meta.last_position_sec)}`;
     name.append(detail);name.onclick=()=>selectJob(meta.job_id);row.append(name);
-    if(terminal.has(meta.status)){const del=document.createElement("button");del.className="secondary delete";del.textContent="刪除";del.onclick=async()=>{if(!confirm("刪除這份本機結果？原始錄影不受影響。"))return;try{await api(`/api/jobs/${meta.job_id}`,{method:"DELETE"});if(selected?.job_id===meta.job_id){++generation;if(stream)stream.close();selected=null;rows=[];lastId=0;$("transcript").replaceChildren();$("status").textContent="結果已刪除。";document.querySelectorAll("[data-format]").forEach(b=>b.disabled=true);$("copy").disabled=true;}await history();}catch(e){message(e.message);}};row.append(del);}
+    if(terminal.has(meta.status)){const del=document.createElement("button");del.className="secondary delete";del.textContent="刪除";del.onclick=async()=>{if(!confirm("刪除這份本機結果？原始錄影不受影響。"))return;try{await api(`/api/jobs/${meta.job_id}`,{method:"DELETE"});if(selected?.job_id===meta.job_id)resetWorkspace({deleted:true});await history();}catch(e){message(e.message);}};row.append(del);}
     $("history").append(row);
   }
   historyOffset=offset+result.items.length;$("more").hidden=historyOffset>=result.total;
@@ -97,19 +147,44 @@ async function refreshActive(){
   finally{activePollPending=false;}
 }
 $("form").onsubmit=async event=>{
-  event.preventDefault();message();if(active)return;
+  event.preventDefault();message();if(active||submitting)return;
   const file=$("file").files[0];if(!file)return;
-  $("start").disabled=true;
+  submitting=true;updateButtons();
   try{
     const meta=await api("/api/jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({source_name:file.name,expected_bytes:file.size,title:$("title").value,meeting_date:$("date").value,participants:$("participants").value,terms:$("terms").value,model:$("model").value,language:$("language").value,condition_on_previous_text:$("previousContext").checked,cpu_threads:Number($("threads").value),traditional:$("traditional").checked})});
     active=meta.job_id;await selectJob(meta.job_id);await history();
     await new Promise((resolve,reject)=>{xhr=new XMLHttpRequest();xhr.open("PUT",`/api/jobs/${meta.job_id}/media`);xhr.setRequestHeader("Content-Type","application/octet-stream");xhr.setRequestHeader("X-CSRF-Token",csrf);xhr.upload.onprogress=e=>{if(selected?.job_id===meta.job_id&&e.lengthComputable){$("progress").value=e.loaded/e.total*100;$("timing").textContent=`上傳 ${Math.round(e.loaded/e.total*100)}%（與轉錄進度分開）`;}};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300)resolve();else{let text="上傳失敗";try{text=JSON.parse(xhr.responseText).message;}catch{}reject(new Error(text));}};xhr.onerror=()=>reject(new Error("上傳連線中斷。"));xhr.onabort=()=>reject(new Error("上傳已中止。"));xhr.send(file);});
-  }catch(error){message(error.message);}finally{xhr=null;try{await history();}catch{}updateButtons();}
+  }catch(error){message(error.message);}finally{submitting=false;xhr=null;try{await history();}catch{}updateButtons();}
 };
-$("cancel").onclick=async()=>{if(!selected)return;const id=selected.job_id;try{const promise=api(`/api/jobs/${id}/cancel`,{method:"POST"});if(xhr)xhr.abort();showMeta(await promise);}catch(e){message(e.message);}};
-$("copy").onclick=async()=>{const text=`狀態：${labels[selected.status]}${selected.status!=="completed"?"（不完整）":""}\n`+rows.map(r=>`[${time(r.start_sec)}] ${r.text}`).join("\n");try{await navigator.clipboard.writeText(text);message("逐字稿已複製。");}catch{message("無法自動複製，請選取預覽文字後按 Ctrl+C。");const range=document.createRange();range.selectNodeContents($("transcript"));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);}};
+$("clearWorkspace").onclick=clearWorkspace;
+$("cancel").onclick=async()=>{
+  if(!selected)return;
+  const id=selected.job_id,ticket=generation;
+  try{
+    const promise=api(`/api/jobs/${id}/cancel`,{method:"POST"});
+    if(xhr)xhr.abort();
+    const meta=await promise;
+    if(ticket===generation&&selected?.job_id===id)showMeta(meta);
+  }catch(error){if(ticket===generation)message(error.message);}
+};
+$("copy").onclick=async()=>{
+  if(!selected||!rows.length)return;
+  const ticket=generation;
+  const text=`狀態：${labels[selected.status]}${selected.status!=="completed"?"（不完整）":""}\n`+rows.map(r=>`[${time(r.start_sec)}] ${r.text}`).join("\n");
+  try{
+    await navigator.clipboard.writeText(text);
+    if(ticket===generation)message("逐字稿已複製。");
+  }catch{
+    if(ticket!==generation)return;
+    message("無法自動複製，請選取預覽文字後按 Ctrl+C。");
+    const range=document.createRange();range.selectNodeContents($("transcript"));
+    const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
+  }
+};
+
 document.querySelectorAll("[data-format]").forEach(button=>button.onclick=async()=>{
   if(!selected)return;
+  const ticket=generation;
   try{
     const response=await fetch(`/api/jobs/${selected.job_id}/export?format=${button.dataset.format}&variant=${button.dataset.variant||"display"}`);
     if(!response.ok)throw new Error((await response.json()).message);
@@ -118,18 +193,19 @@ document.querySelectorAll("[data-format]").forEach(button=>button.onclick=async(
     const encoded=response.headers.get("Content-Disposition")?.split("filename*=UTF-8''")[1];
     link.download=encoded?decodeURIComponent(encoded):`逐字稿.${button.dataset.format}`;
     document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
-  }catch(error){message(error.message);}
+  }catch(error){if(ticket===generation)message(error.message);}
 });
 $("refresh").onclick=()=>history().catch(e=>message(e.message));$("more").onclick=()=>history(true).catch(e=>message(e.message));
 $("file").onchange=()=>{const file=$("file").files[0];if(file)$("fileInfo").textContent=`${file.name} · ${(file.size/1024**2).toFixed(1)} MiB`;};
 const zone=$("dropzone");zone.ondragover=e=>{e.preventDefault();zone.classList.add("over");};zone.ondragleave=()=>zone.classList.remove("over");zone.ondrop=e=>{e.preventDefault();zone.classList.remove("over");if(e.dataTransfer.files.length!==1){message("請一次選擇一個檔案。");return;}$("file").files=e.dataTransfer.files;$("file").onchange();};
 async function init(){
+  const ticket=generation;
   const config=await api("/api/session");csrf=config.csrf;
   const models=await api("/api/models");$("model").replaceChildren();
   for(const model of models){const option=document.createElement("option");option.value=model.name;option.textContent=`${model.name} · ${model.ready?"已準備":"未準備"}`;option.disabled=!model.ready;$("model").append(option);}
   modelsReady=models.some(m=>m.ready);if(models.find(m=>m.name==="small").ready)$("model").value="small";
   $("modelHelp").textContent=modelsReady?"small 為預設；medium／large-v3-turbo 請先以短片段比較品質、耗時與記憶體。":"尚無可用模型。請先依 README 執行 prepare_models.py，再重新整理頁面。";
-  await history();const latest=await api("/api/jobs/latest");if(latest)await selectJob(latest.job_id);updateButtons();
+  await history();await restoreWorkspace(ticket);updateButtons();
   setInterval(refreshActive,2000);
 }
 init().catch(e=>message(e.message));

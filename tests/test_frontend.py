@@ -12,7 +12,12 @@ def test_frontend_task_tracking():
     if node is None:
         pytest.skip("前端回歸測試需要 Node.js")
     result = subprocess.run(
-        [node, "--test", str(Path(__file__).with_name("frontend.test.cjs"))],
+        [
+            node,
+            "--test",
+            str(Path(__file__).with_name("frontend.test.cjs")),
+            str(Path(__file__).with_name("theme.test.cjs")),
+        ],
         capture_output=True,
         text=True,
         encoding="utf-8",

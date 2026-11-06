@@ -4,40 +4,74 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>會議逐字稿 · 本機離線</title>
+  <meta name="color-scheme" content="light dark">
+  <script src="/static/theme.js"></script>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header><span class="eyebrow">LOCAL TRANSCRIPT</span><h1>把會議，留下來。</h1><p>本機離線轉錄中文與英文術語，匯出逐字稿，交給 AI 整理會議紀錄。</p><span class="badge">CPU · 本機處理 · 無雲端上傳</span></header>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 10v4m4-8v12m4-15v18m4-15v12m4-8v4"/></svg></span>
+        <div><h1>會議逐字稿</h1><span class="brand-caption">LOCAL TRANSCRIPT</span></div>
+      </div>
+      <div class="header-actions">
+        <span class="badge"><span class="status-dot" aria-hidden="true"></span>本機離線<span class="badge-detail"> · CPU 處理</span></span>
+        <label class="theme-control"><span class="sr-only">顯示模式</span><select id="theme" aria-label="顯示模式"><option value="system">跟隨系統</option><option value="light">淺色模式</option><option value="dark">深色模式</option></select></label>
+      </div>
+    </div>
+  </header>
   <main>
     <section class="panel setup">
-      <h2>新增轉錄</h2>
+      <div class="setup-heading"><span class="eyebrow">開始一份新紀錄</span><h2>新增轉錄</h2></div>
       <form id="form">
-        <label id="dropzone" class="dropzone">選擇或拖放會議錄音／影片<input id="file" type="file" accept=".mp4,.mp3,.wav,.m4a" required><small id="fileInfo">MP4、MP3、WAV、M4A · 最大 4 GiB／120 分鐘 · 第一條音軌</small></label>
-        <label>會議名稱<input id="title" maxlength="300" placeholder="預設使用檔案名稱"></label>
-        <div class="pair"><label>會議日期（選填）<input id="date" type="date"></label><label>語言<select id="language"><option value="zh">中文（可混用英文）</option><option value="auto">自動偵測（開頭）</option><option value="mixed">中英交替（分段偵測，實驗）</option><option value="en">英文</option></select></label></div>
-        <label>已知與會者（選填）<input id="participants" maxlength="2000" placeholder="不會自動辨識發言者"></label>
-        <label>專有名詞（選填）<textarea id="terms" rows="2" maxlength="4000" placeholder="例如：CyteSi、GLT、API、產品型號"></textarea><small>作為辨識提示，非強制替換。完整提示上限 200 tokens，過長會提示縮短。</small></label>
-        <div class="pair"><label>模型<select id="model"><option>檢查中…</option></select></label><label>CPU 執行緒<select id="threads"><option>4</option><option>6</option><option>8</option></select></label></div>
-        <p id="modelHelp" class="hint"></p>
-        <label class="check"><input id="traditional" type="checkbox" checked>保守簡轉繁，保留原始辨識文字供下載</label>
-        <details><summary>進階辨識設定</summary><label class="check"><input id="previousContext" type="checkbox" checked>參考前文，維持上下文連貫</label><p class="hint">出現連續重複或語言切換後漏字時，可關閉後比較短樣本；可能影響用詞一致性。分段偵測以模型音訊視窗判斷語言，不保證每句切換皆正確。</p></details>
-        <button id="start" type="submit" disabled>開始轉錄</button>
+        <div class="form-body">
+        <label id="dropzone" class="dropzone">
+          <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4m-4 4 4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+          <span>拖放會議錄音或影片</span>
+          <input id="file" type="file" accept=".mp4,.mp3,.wav,.m4a" required>
+          <small id="fileInfo" aria-live="polite">尚未選擇檔案</small>
+        </label>
+        <p class="file-support">MP4、MP3、WAV、M4A<br>最大 4 GiB／120 分鐘 · 第一條音軌</p>
+        <fieldset class="form-section">
+          <legend><span class="step-number">01</span>會議資訊</legend>
+          <label>會議名稱<input id="title" maxlength="300" placeholder="預設使用檔案名稱"></label>
+          <label>會議日期<span class="optional">選填</span><input id="date" type="date"></label>
+          <label>已知與會者<span class="optional">選填</span><input id="participants" maxlength="2000" placeholder="不會自動辨識發言者"></label>
+        </fieldset>
+        <fieldset class="form-section">
+          <legend><span class="step-number">02</span>辨識設定</legend>
+          <label>語言<select id="language"><option value="zh">中文（可混用英文）</option><option value="auto">自動偵測（開頭）</option><option value="mixed">中英交替（分段偵測，實驗）</option><option value="en">英文</option></select></label>
+          <label>模型<select id="model"><option>檢查中…</option></select></label>
+          <p id="modelHelp" class="hint model-help"></p>
+          <label>專有名詞<span class="optional">選填</span><textarea id="terms" rows="2" maxlength="4000" placeholder="CyteSi、GLT、API、產品型號"></textarea><small>作為辨識提示，非強制替換。完整提示上限 200 tokens，過長會提示縮短。</small></label>
+          <label class="check"><input id="traditional" type="checkbox" checked>保守簡轉繁，保留原始辨識文字供下載</label>
+          <details class="settings-details"><summary>進階辨識設定</summary><label>CPU 執行緒<select id="threads"><option>4</option><option>6</option><option>8</option></select></label><label class="check"><input id="previousContext" type="checkbox" checked>參考前文，維持上下文連貫</label><p class="hint">出現連續重複或語言切換後漏字時，可關閉後比較短樣本；可能影響用詞一致性。分段偵測以模型音訊視窗判斷語言，不保證每句切換皆正確。</p></details>
+        </fieldset>
+        </div>
+        <button id="start" class="start-button" type="submit" disabled><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 10 7-10 7V5Z"/></svg>開始轉錄</button>
       </form>
-      <p class="hint">轉錄期間可關閉頁面，服務會繼續工作。停止整個服務請回啟動視窗按 Ctrl+C。</p>
+      <p class="hint setup-note">轉錄期間可關閉頁面，服務會繼續工作。停止整個服務請回啟動視窗按 Ctrl+C。</p>
     </section>
     <section class="workspace">
-      <section class="panel">
-        <div class="sectionhead"><h2 id="jobTitle">逐字稿</h2><button id="cancel" class="secondary" disabled>取消轉錄</button></div>
-        <p id="status" role="status" aria-live="polite">選擇檔案，開始第一份會議逐字稿。</p>
-        <progress id="progress" max="100" value="0"></progress>
-        <p id="timing" class="hint">模型載入與解碼期間不顯示估計百分比。</p>
+      <section class="panel transcript-panel">
+        <div class="sectionhead reader-heading"><div class="reader-title"><span class="eyebrow">逐字稿工作區</span><h2 id="jobTitle">逐字稿</h2></div><div class="workspace-controls"><div class="workspace-buttons"><button id="clearWorkspace" class="secondary" type="button" aria-describedby="clearWorkspaceHint" disabled>清除工作區</button><button id="cancel" class="secondary cancel-button" type="button" disabled>取消轉錄</button></div><span id="clearWorkspaceHint" class="hint clear-hint">只清空顯示，歷史結果保留。</span></div></div>
+        <div class="progress-area">
+          <p id="status" role="status" aria-live="polite">選擇檔案，開始第一份會議逐字稿。</p>
+          <progress id="progress" max="100" value="0"></progress>
+          <p id="timing" class="hint">模型載入與解碼期間不顯示估計百分比。</p>
+        </div>
         <p id="message" class="message" role="alert"></p>
-        <div class="actions"><button id="copy" class="secondary" disabled>複製逐字稿</button><button data-format="md" disabled>下載會議整理用 MD</button><button class="secondary" data-format="txt" disabled>TXT</button><button class="secondary" data-format="txt" data-variant="raw" disabled>原始 TXT</button><button class="secondary" data-format="srt" disabled>SRT</button></div>
-        <p class="hint">AI 整理指示已附於 MD。結果不會自動送至外部 AI，重要術語與決議請回查。</p>
-        <div id="transcript" class="transcript" tabindex="0" aria-label="逐字稿預覽"><p class="empty">完成一段，就會在這裡留下文字。</p></div>
+        <div class="actions">
+          <div class="primary-actions"><button data-format="md" disabled><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>下載會議整理用 MD</button><button id="copy" class="secondary" disabled><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></svg>複製逐字稿</button></div>
+          <div class="format-actions" role="group" aria-label="其他匯出格式"><span>其他格式</span><button class="secondary" data-format="txt" disabled>TXT</button><button class="secondary" data-format="txt" data-variant="raw" disabled>原始 TXT</button><button class="secondary" data-format="srt" disabled>SRT</button></div>
+        </div>
+        <p class="hint export-note">MD 已附 AI 整理指示 · 結果不會自動送至外部 AI · 重要術語與決議請回查</p>
+        <div class="transcript-columns" aria-hidden="true"><span>時間</span><span>辨識內容</span></div>
+        <div id="transcript" class="transcript" tabindex="0" aria-label="逐字稿預覽"><div class="empty"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z"/><path d="M14 3v6h6M8 13h8m-8 4h5"/></svg></span><h3>從一段錄音開始</h3><p>完成一段，就會在這裡留下帶時間戳的文字。</p></div></div>
       </section>
-      <section class="panel"><div class="sectionhead"><h2>本機歷史</h2><button id="refresh" class="secondary">重新整理</button></div><p class="hint">儲存在專案 data/jobs；新任務不覆蓋舊結果。下載位置由瀏覽器決定。</p><div id="history"></div><button id="more" class="secondary" hidden>載入更多</button></section>
+      <section class="panel history-panel"><div class="sectionhead"><div><span class="eyebrow">保存在這台電腦</span><h2>本機歷史</h2></div><button id="refresh" class="secondary" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></svg>重新整理</button></div><p class="hint">新任務會保留舊結果。下載位置由瀏覽器決定，可隨時刪除本機紀錄。</p><div id="history"></div><button id="more" class="secondary" hidden>載入更多</button></section>
     </section>
   </main>
 </body>
