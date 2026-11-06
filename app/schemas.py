@@ -38,7 +38,8 @@ class JobRequest(BaseModel):
     participants: str = Field(default="", max_length=2000)
     terms: str = Field(default="", max_length=4000)
     model: ModelName = "small"
-    language: Literal["zh", "auto", "en"] = "zh"
+    language: Literal["zh", "auto", "en", "mixed"] = "zh"
+    condition_on_previous_text: bool = True
     cpu_threads: Literal[4, 6, 8] = 4
     traditional: bool = True
 

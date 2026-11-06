@@ -11,7 +11,7 @@ import pytest
 from app.config import ROOT, Settings
 from app.models import model_path
 from app.schemas import AppError, JobRequest
-from app.transcriber import decode_media, transcribe
+from app.transcriber import decode_media, transcribe, transcription_options
 
 
 def test_silent_wav_and_duration_limit(tmp_path):
@@ -70,6 +70,60 @@ def test_prompt_limit_before_decode(tmp_path, monkeypatch):
     request = JobRequest(source_name="meeting.mp4", expected_bytes=1)
     with pytest.raises(AppError, match="200 tokens"):
         transcribe(tmp_path / "absent.mp4", request, Settings(), lambda *args: None, lambda: False)
+
+
+@pytest.mark.parametrize(
+    ("language", "expected_language", "multilingual"),
+    [("zh", "zh", False), ("en", "en", False), ("auto", None, False), ("mixed", None, True)],
+)
+def test_language_and_context_reach_engine(
+    tmp_path, monkeypatch, language, expected_language, multilingual
+):
+    from types import SimpleNamespace
+
+    import faster_whisper
+
+    (tmp_path / "ready.json").write_text('{"revision":"test-revision"}', encoding="utf-8")
+    monkeypatch.setattr("app.transcriber.model_path", lambda *args: tmp_path)
+    monkeypatch.setattr("app.transcriber.decode_media", lambda *args: np.zeros(16000, np.float32))
+    calls = []
+
+    def recognize(audio, **kwargs):
+        calls.append(kwargs)
+        return iter([SimpleNamespace(start=0, end=1, text=" API GLT-123 ")]), None
+
+    fake = SimpleNamespace(
+        hf_tokenizer=SimpleNamespace(encode=lambda text: SimpleNamespace(ids=[1])),
+        transcribe=recognize,
+    )
+    monkeypatch.setattr(faster_whisper, "WhisperModel", lambda *args, **kwargs: fake)
+    request = JobRequest(
+        source_name="meeting.wav",
+        expected_bytes=3,
+        language=language,
+        terms="GLT-123",
+        condition_on_previous_text=False,
+    )
+    events = []
+    transcribe(
+        tmp_path / "meeting.wav",
+        request,
+        Settings(),
+        lambda *event: events.append(event),
+        lambda: False,
+    )
+    assert calls[0]["language"] == expected_language
+    assert calls[0]["multilingual"] is multilingual
+    assert calls[0]["condition_on_previous_text"] is False
+    assert calls[0]["initial_prompt"].endswith("GLT-123")
+    assert next(data for kind, data in events if kind == "segment")["raw_text"] == "API GLT-123"
+
+
+def test_legacy_request_keeps_previous_defaults():
+    request = JobRequest.model_validate({"source_name": "meeting.wav", "expected_bytes": 3})
+    options = transcription_options(request)
+    assert options["condition_on_previous_text"] is True
+    assert options["multilingual"] is False and options["language"] == "zh"
 
 
 def encode_aac(source, destination):

@@ -110,6 +110,7 @@ def export(meta: JobMeta, segments: list[TranscriptSegment], fmt: str, raw: bool
         f"音軌時長：{timestamp(meta.duration_sec) if meta.duration_sec is not None else '未知'}\n"
         f"模型：{meta.request.model}／{meta.model_revision or '未知 revision'}\n"
         f"語言：{meta.request.language}；轉換：{meta.conversion}\n"
+        f"參考前文：{'開啟' if meta.request.condition_on_previous_text else '關閉'}\n"
     )
     body = transcript_body(segments, raw)
     if fmt == "txt":

@@ -220,3 +220,16 @@ def test_upload_close_failure_releases_slot(client, monkeypatch, write_failure):
     assert job_id not in manager.receiving and manager.active is None
     assert not (manager.directory(job_id) / "media.upload").exists()
     assert new(c).status_code == 201
+
+
+def test_mixed_language_settings_persist_and_export(client):
+    c, manager = client
+    response = new(c, language="mixed", condition_on_previous_text=False)
+    assert response.status_code == 201
+    job_id = response.json()["job_id"]
+    manager.cancel(job_id)
+    restored = JobManager(manager.settings, check_model=False)
+    request = restored.get(job_id).request
+    assert request.language == "mixed" and request.condition_on_previous_text is False
+    exported = c.get(f"/api/jobs/{job_id}/export?format=md").text
+    assert "語言：mixed" in exported and "參考前文：關閉" in exported

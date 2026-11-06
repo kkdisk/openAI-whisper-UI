@@ -2,7 +2,7 @@
 
 Windows 本機 Web UI，使用 faster-whisper CPU INT8 辨識中文及英文專有名詞。主要輸出帶時間戳 TXT 與附 AI 整理指示的 Markdown，另可下載 SRT。音檔及文字不會由本工具上傳外部服務。
 
-目前版本：**v0.2.0**。新增 large-v3-turbo 選項、模型離線驗證復原及五分鐘合成測試素材產生工具；修正停止服務、上傳失敗清理、結果恢復、歷史切換狀態與繁體轉換。中英混合辨識品質仍需回聽核對；GPU 與說話者分離尚未實作。
+目前版本：**v0.3.0**。新增實驗性中英交替偵測、前文參考開關，以及語言／提示／語速比較工具。保留 v0.2.0 的 turbo 模型支援與流程修復；預設模型及辨識參數維持原設定，實驗結果不代表準確率已改善。新 UI 瀏覽器人工驗收仍待完成，GPU 與說話者分離尚未實作。
 
 ## 日常使用
 
@@ -18,6 +18,26 @@ Windows 本機 Web UI，使用 faster-whisper CPU INT8 辨識中文及英文專�
 2. 選填會議名稱、日期、已知與會者與專有名詞；語言預設中文、模型 small、4 執行緒。
 3. 開始轉錄。上傳進度與轉錄進度分開顯示；載入模型／解碼時不顯示虛構百分比。
 4. 完成後下載「會議整理用 MD」，自行交給 AI 整理。TXT 保留時間戳，原始 TXT 保留繁體轉換前文字。
+
+若會議有整段中文與整段英文交替，可試「中英交替（分段偵測，實驗）」；原本的「自動偵測」只從開頭判斷語言。分段偵測以模型音訊視窗運作，不保證逐句切換皆正確。若有連續重複，可在「進階辨識設定」關閉「參考前文」後重跑短樣本比較；可能影響用詞一致性。新設定會隨任務保存，TXT／MD 亦記載前文設定；舊任務維持原本設定，不自動重跑。
+
+開發比較可執行以下指令，依序比較三組參數，輸出原文 JSONL、模型／音檔指紋與各組耗時到新目錄；不覆蓋既有資料，不下載模型。請先完成或取消 UI 中的轉錄，避免同時執行影響耗時。
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_transcription.py temp\mixed_zh_en_5min.wav --output temp\quality-comparison
+```
+
+預設使用已準備的 large-v3-turbo／CPU INT8／8 執行緒，可用 `--model`、`--threads` 與 `--profiles baseline multilingual independent` 指定。三組依序僅變更分段偵測、前文參考；共用已載入模型與音訊，耗時不含載入及解碼，不等於 UI 任務總耗時或準確率。
+
+提示詞比較可指定 `--profiles baseline no_prompt terms_only --terms "API GLT-123" --seed 42`：依序使用既有中文引導、無提示、僅術語提示，固定其他參數。`--terms` 只用於 terms_only，不將完整參考稿當成提示；各組提示仍限制在 200 tokens。`--seed` 可在每組開始前重設 CT2 隨機種子，並不保證跨電腦或不同硬體完全一致。
+
+也可測試保留音高的語速變化（原速、0.9、0.85 倍），預設取前 70 秒、baseline 參數，每組重設相同隨機種子。使用 PyAV 內建 atempo，不需額外安裝 FFmpeg；輸出 WAV、原文及名義換算回原檔的時間戳。這是比較工具，尚未套用於 UI：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_speed.py temp\mixed_zh_en_5min.wav --output temp\speed-comparison
+```
+
+可用 `--start`、`--duration`、`--profile` 選擇區間及固定參數組。放慢會改變音訊長度與視窗邊界，不保證辨識改善；變速及模型本身也可能使時間戳偏移。
 
 檔案上限 4 GiB、音軌上限 120 分鐘，使用第一條音軌。這些限制可在 `app/config.py` 調整；媒體編碼是否可解碼仍需實際檢查。專有名詞用來提示模型，不會強制替換；完整提示超過 200 tokens 會顯示縮短提示，字數不等於 token 數。
 

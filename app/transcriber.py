@@ -10,6 +10,18 @@ from app.models import model_path, offline_mode
 from app.schemas import AppError, JobRequest, TranscriptSegment
 
 
+def transcription_options(request: JobRequest) -> dict:
+    return {
+        "language": None if request.language in {"auto", "mixed"} else request.language,
+        "task": "transcribe",
+        "beam_size": 5,
+        "initial_prompt": "這是一場中文為主、包含英文專有名詞的會議。 " + request.terms.strip(),
+        "vad_filter": True,
+        "multilingual": request.language == "mixed",
+        "condition_on_previous_text": request.condition_on_previous_text,
+    }
+
+
 def decode_media(path: Path, max_duration_sec: int, cancelled=lambda: False):
     import av
     import numpy as np
@@ -70,7 +82,8 @@ def transcribe(path: Path, request: JobRequest, settings: Settings, emit, cancel
         cpu_threads=request.cpu_threads,
         local_files_only=True,
     )
-    prompt = "這是一場中文為主、包含英文專有名詞的會議。 " + request.terms.strip()
+    options = transcription_options(request)
+    prompt = options["initial_prompt"]
     tokens = model.hf_tokenizer.encode(" " + prompt.strip()).ids
     if len(tokens) > settings.prompt_tokens:
         raise AppError("prompt_limit", "專有名詞提示過長，請縮短至完整提示 200 tokens 以內。")
@@ -97,14 +110,7 @@ def transcribe(path: Path, request: JobRequest, settings: Settings, emit, cancel
     if cancelled():
         return
     emit("status", {"status": "transcribing"})
-    segments, _ = model.transcribe(
-        audio,
-        language=None if request.language == "auto" else request.language,
-        task="transcribe",
-        beam_size=5,
-        initial_prompt=prompt,
-        vad_filter=True,
-    )
+    segments, _ = model.transcribe(audio, **options)
     for i, segment in enumerate(segments, 1):
         if cancelled():
             return

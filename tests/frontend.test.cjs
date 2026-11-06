@@ -66,3 +66,24 @@ test("temporary network failure keeps the slot and permits another poll",async()
   await evaluate(`api=async()=>({active_id:null,items:[],total:0});refreshActive();`);
   assert.equal(evaluate("active"),null);
 });
+
+test("new transcription sends mixed language and context selection",async()=>{
+  const {elements,evaluate} = setup();
+  evaluate(`
+    $("file").files=[{name:"meeting.wav",size:3}];
+    $("language").value="mixed";$("previousContext").checked=false;
+    $("threads").value="8";$("model").value="large-v3-turbo";
+    var submitted;
+    api=async(path,options)=>{
+      if(options?.method==="POST"){
+        submitted=JSON.parse(options.body);
+        throw new Error("Stop before upload in this isolated test");
+      }
+      return {active_id:null,items:[],total:0};
+    };
+  `);
+  await elements.get("form").onsubmit({preventDefault(){}});
+  assert.equal(evaluate("submitted.language"),"mixed");
+  assert.equal(evaluate("submitted.condition_on_previous_text"),false);
+  assert.equal(evaluate("submitted.model"),"large-v3-turbo");
+});
