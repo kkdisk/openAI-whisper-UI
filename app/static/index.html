@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>會議逐字稿 · 本機離線</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header><span class="eyebrow">LOCAL TRANSCRIPT</span><h1>把會議，留下來。</h1><p>本機離線轉錄中文與英文術語，匯出逐字稿，交給 AI 整理會議紀錄。</p><span class="badge">CPU · 本機處理 · 無雲端上傳</span></header>
+  <main>
+    <section class="panel setup">
+      <h2>新增轉錄</h2>
+      <form id="form">
+        <label id="dropzone" class="dropzone">選擇或拖放會議錄音／影片<input id="file" type="file" accept=".mp4,.mp3,.wav,.m4a" required><small id="fileInfo">MP4、MP3、WAV、M4A · 最大 4 GiB／120 分鐘 · 第一條音軌</small></label>
+        <label>會議名稱<input id="title" maxlength="300" placeholder="預設使用檔案名稱"></label>
+        <div class="pair"><label>會議日期（選填）<input id="date" type="date"></label><label>語言<select id="language"><option value="zh">中文（可混用英文）</option><option value="auto">自動偵測</option><option value="en">英文</option></select></label></div>
+        <label>已知與會者（選填）<input id="participants" maxlength="2000" placeholder="不會自動辨識發言者"></label>
+        <label>專有名詞（選填）<textarea id="terms" rows="2" maxlength="4000" placeholder="例如：CyteSi、GLT、API、產品型號"></textarea><small>作為辨識提示，非強制替換。完整提示上限 200 tokens，過長會提示縮短。</small></label>
+        <div class="pair"><label>模型<select id="model"><option>檢查中…</option></select></label><label>CPU 執行緒<select id="threads"><option>4</option><option>6</option><option>8</option></select></label></div>
+        <p id="modelHelp" class="hint"></p>
+        <label class="check"><input id="traditional" type="checkbox" checked>簡轉繁（s2t），保留原始辨識文字供下載</label>
+        <button id="start" type="submit" disabled>開始轉錄</button>
+      </form>
+      <p class="hint">轉錄期間可關閉頁面，服務會繼續工作。停止整個服務請回啟動視窗按 Ctrl+C。</p>
+    </section>
+    <section class="workspace">
+      <section class="panel">
+        <div class="sectionhead"><h2 id="jobTitle">逐字稿</h2><button id="cancel" class="secondary" disabled>取消轉錄</button></div>
+        <p id="status" role="status" aria-live="polite">選擇檔案，開始第一份會議逐字稿。</p>
+        <progress id="progress" max="100" value="0"></progress>
+        <p id="timing" class="hint">模型載入與解碼期間不顯示估計百分比。</p>
+        <p id="message" class="message" role="alert"></p>
+        <div class="actions"><button id="copy" class="secondary" disabled>複製逐字稿</button><button data-format="md" disabled>下載會議整理用 MD</button><button class="secondary" data-format="txt" disabled>TXT</button><button class="secondary" data-format="txt" data-variant="raw" disabled>原始 TXT</button><button class="secondary" data-format="srt" disabled>SRT</button></div>
+        <p class="hint">AI 整理指示已附於 MD。結果不會自動送至外部 AI，重要術語與決議請回查。</p>
+        <div id="transcript" class="transcript" tabindex="0" aria-label="逐字稿預覽"><p class="empty">完成一段，就會在這裡留下文字。</p></div>
+      </section>
+      <section class="panel"><div class="sectionhead"><h2>本機歷史</h2><button id="refresh" class="secondary">重新整理</button></div><p class="hint">儲存在專案 data/jobs；新任務不覆蓋舊結果。下載位置由瀏覽器決定。</p><div id="history"></div><button id="more" class="secondary" hidden>載入更多</button></section>
+    </section>
+  </main>
+</body>
+</html>
