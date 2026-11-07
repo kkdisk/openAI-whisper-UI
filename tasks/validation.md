@@ -331,3 +331,16 @@ Git 初始化時，本機 main 追蹤 `https://github.com/kkdisk/openAI-whisper-
 - 本輪重跑 `.venv\Scripts\python.exe -m pytest --real-model --gpu -q`：**116 passed、無略過，42.11 秒**。沿用本機合成語音 WHISPER_TEST_AUDIO 與明確 Node 路徑，包含真實 CPU 模型／MP4、CUDA 兩種精度與 auto、GPU 暫停／繼續／取消，以及 Windows 程序與前端回歸。保留既有 Starlette TestClient 棄用警告 1 項。
 - Ruff check、Ruff format --check（29 檔）、兩個前端 JS 語法、`uv lock --check --offline --cache-dir .uv-cache` 與 `git diff --check` 均通過。模型權重與依賴版本保持前節驗證組合，既有 GPU／長檔品質等未驗收範圍不因標記版號而勾選。
 - 提交前遠端 main 核對為 f9f6dcb5f795ca48031e14e8bb5843a7a6acd1ad，尚無 v0.5.0；本次交付 refs 僅 main 與新 annotated tag v0.5.0，不移動 v0.1.0～v0.4.0。不建立 GitHub Release 或 EXE。遠端 CI 狀態 Unknown：本輪未執行或取得遠端 CI 結果，不將本機測試當作 CI 通過。
+
+## M5 使用者整階段接受（2026-11-07）
+
+- 在完成度核對列出 M5 範圍後，使用者明確回報「M5 ok」，依此記錄 M5 整階段人工接受，todo 的 T50.1～T50.10 及 T50.G 均標記完成；T50.2 原已完成，本次新增 10 項勾選。
+- 這是使用者接受結案的證據；使用者未附逐項測試紀錄或量測值。峰值 RAM、載入／解碼／推論各階段取消秒數、small／medium 與 4／6／8 執行緒比較、斷網及關閉視窗操作明細均未記錄，不補造數據或宣稱已量測符合 8 GiB／5 秒門檻。
+- 本輪僅更新文件，未修改程式或重跑測試；最近完整自動回歸仍為 v0.5.0 提交前的 116 passed。M2～M4 尚缺的故障矩陣、H10 分狀態資源量測及 M6／M7 進階品質／模型比較維持原狀，不因 M5 接受而自動勾選其他階段。
+
+## v0.5.1 文件交付（2026-11-08）
+
+- 使用者要求 commit／tag／push；本次提交 todo 完成度核對、M5 整階段使用者接受及其量測證據邊界，版號同步 README／pyproject.toml／uv.lock 至 0.5.1，功能程式不變。
+- todo 共 108 項，67 已勾選、41 未勾選；M5 為 11／11，依使用者「M5 ok」接受結案，不宣稱本輪補做或量測全部案例。
+- 本輪僅檢查文件連結、勾選統計、版號／鎖檔與 Git 差異，不重跑功能測試；最近完整回歸維持 v0.5.0 的 116 passed／無略過，遠端 CI 狀態未核對。
+- 推送前遠端 main 為 836c08d36f542e457559a6400795db5ae6723278，尚無 v0.5.1；本次僅交付 main 與新 annotated tag v0.5.1，既有標籤不移動，不建立 GitHub Release。
