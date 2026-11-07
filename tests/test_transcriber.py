@@ -105,18 +105,31 @@ def test_language_and_context_reach_engine(
         condition_on_previous_text=False,
     )
     events = []
+
+    class Control:
+        checkpoints = 0
+
+        def __call__(self):
+            return False
+
+        def checkpoint(self):
+            self.checkpoints += 1
+            return True
+
+    control = Control()
     transcribe(
         tmp_path / "meeting.wav",
         request,
         Settings(),
         lambda *event: events.append(event),
-        lambda: False,
+        control,
     )
     assert calls[0]["language"] == expected_language
     assert calls[0]["multilingual"] is multilingual
     assert calls[0]["condition_on_previous_text"] is False
     assert calls[0]["initial_prompt"].endswith("GLT-123")
     assert next(data for kind, data in events if kind == "segment")["raw_text"] == "API GLT-123"
+    assert control.checkpoints == 2  # 包含最後一次取值／StopIteration 前的閘門。
 
 
 def test_legacy_request_keeps_previous_defaults():

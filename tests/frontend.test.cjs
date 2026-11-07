@@ -369,3 +369,54 @@ test("revision load failure blocks corrected export but still permits the raw ba
   assert.equal(fetched.length,1);
   assert.match(fetched[0],/variant=raw/);
 });
+
+test("pause waits for acknowledgement, resumes separately and does not wait for edit saves",async()=>{
+  const {evaluate,elements}=setup();await seedEditor(evaluate);
+  evaluate(`
+    editor.dirty.set("s:1",{key:"s:1",text:"unsaved"});
+    var controlCalls=[];
+    api=async(path,options)=>{
+      controlCalls.push(path);
+      return {...selected,control_seq:1,execution_state:"pause_requested"};
+    };
+  `);
+  await elements.get("pauseResume").onclick();
+  assert.equal(evaluate("controlCalls[0]"),"/api/jobs/A/pause");
+  assert.equal(evaluate("controlCalls.length"),1);
+  assert.equal(elements.get("pauseResume").disabled,true);
+  evaluate(`showMeta({...selected,execution_state:"paused",paused_sec:20,active_elapsed_sec:10});`);
+  assert.equal(elements.get("pauseResume").textContent,"繼續轉錄");
+  assert.equal(elements.get("pauseResume").disabled,false);
+  assert.equal(elements.get("cancel").disabled,false);
+  assert.match(elements.get("status").textContent,/已暫停/);
+  assert.match(elements.get("timing").textContent,/暫停估算/);
+  await evaluate(`api=async(path)=>{controlCalls.push(path);return {...selected,control_seq:2,execution_state:"resume_requested"};};$("pauseResume").onclick();`);
+  assert.equal(evaluate("controlCalls[1]"),"/api/jobs/A/resume");
+  assert.equal(evaluate("editor.dirty.size"),1);
+});
+
+test("late HTTP and SSE snapshots cannot regress pause acknowledgements or terminal state",async()=>{
+  const {evaluate,elements}=setup();await seedEditor(evaluate);
+  evaluate(`var release;api=()=>new Promise(resolve=>{release=resolve;});var requestControl=$("pauseResume").onclick();`);
+  evaluate(`showMeta({...selected,control_seq:1,execution_state:"paused"});release({...selected,execution_state:"pause_requested"});`);
+  await evaluate("requestControl");
+  assert.equal(evaluate("selected.execution_state"),"paused");
+  evaluate(`showMeta({...selected,control_seq:0,execution_state:"running"});`);
+  assert.equal(evaluate("selected.execution_state"),"paused");
+  evaluate(`showMeta({...selected,status:"completed"});showMeta({...selected,status:"transcribing",execution_state:"pause_requested"});`);
+  assert.equal(evaluate("selected.status"),"completed");
+  assert.equal(elements.get("pauseResume").disabled,true);
+});
+
+test("pause restores on history load and is disabled outside transcription",async()=>{
+  const {evaluate,elements}=setup();await seedEditor(evaluate,"completed");
+  for(const status of ["uploading","loading_model","decoding","cancelling","completed"]){
+    evaluate(`selected=null;showMeta({...meta,status:${JSON.stringify(status)}});`);
+    assert.equal(elements.get("pauseResume").disabled,true);
+  }
+  evaluate(`selected=null;showMeta({...meta,status:"transcribing",execution_state:"paused",control_seq:1});`);
+  assert.equal(elements.get("pauseResume").textContent,"繼續轉錄");
+  assert.equal(elements.get("pauseResume").disabled,false);
+  evaluate(`showMeta({...selected,control_seq:2,execution_state:"resume_requested",control_wait_sec:16});`);
+  assert.match(elements.get("pauseHint").textContent,/仍在等待/);
+});

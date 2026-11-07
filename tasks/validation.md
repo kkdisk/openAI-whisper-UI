@@ -267,3 +267,12 @@ Git 初始化時，本機 main 追蹤 `https://github.com/kkdisk/openAI-whisper-
 - 完整測試含本機 small／短 MP4 離線辨識 **78 passed、無略過**；Node 前端 20 個及主題 5 個情境由 pytest 執行。保留既有 TestClient 第三方棄用警告 1 項。
 - Ruff、Python 格式、兩個前端 JavaScript 語法、git diff --check 及離線鎖檔檢查通過。瀏覽器驗證範圍及真人接受邊界依前述紀錄；不以提交推送當作 CI、GitHub Release 或完整真實會議驗收。
 - 本機模型、音檔、完整逐字稿、截圖與測試瀏覽器設定檔仍在忽略目錄，不納入提交。
+
+## v0.4.0：人工修訂與 H10 暫停／繼續交付前檢查（2026-11-07）
+
+- 使用者授權 commit／push／tag；本次新版本為 v0.4.0，交付 refs 僅 main 與新 annotated tag v0.4.0，不移動 v0.1.0～v0.3.0。提交前遠端 main 核對為 143ee5d36847f8b2da9b1b63ff9ed78c3a174597，尚無 v0.4.0。
+- 版本同步 README、pyproject.toml 與 uv.lock。前置人工修訂功能在 143ee5d；此次提交包括 H10 IPC 確認、控制序號／競爭保護、暫停取消／清理、計時與 UI 及相應測試與文件。
+- `.venv/Scripts/python.exe -m pytest --real-model -q`：**94 passed、無略過**，25.80 秒。包含本機 small／短 MP4 離線辨識、Windows 真實子程序及暫停時父程序死亡清理；保留既有 Starlette TestClient 棄用警告 1 項。
+- Ruff check、Ruff format --check（24 個 Python 檔）、app.js／theme.js 的 Node 語法檢查、`uv lock --check --offline --cache-dir .uv-cache` 及 `git diff --check` 通過。此專案為原始碼啟動，未產生 EXE 或新增發行安裝包。
+- 真實模型測試驗證一般辨識路徑，沒有量測真實模型暫停延遲／CPU／RAM；H10 控制驗證使用相同受控迭代器的子程序替身。瀏覽器人工接受及完整長會議校稿仍待完成，H10／H.G 保持未勾選。關閉服務後續跑、H20～H50 及 GPU／說話者分離未在此版完成。
+- 不包含模型、音檔、逐字稿與忽略目錄下測試產物。Git 推送與標籤不代表 CI、GitHub Release 或上述人工接受通過；此次未要求建立 GitHub Release。

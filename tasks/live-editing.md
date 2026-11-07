@@ -16,4 +16,4 @@
 - 已完成以上功能；實作位於 app/revisions.py、app/main.py、app/static/app.js 及匯出層，README 已加入操作與保存限制。
 - pytest：82 passed、1 skipped（既有需指定模型的測試）；包含 Node 前端回歸，新增 5 個 API 與 6 個前端情境；frontend.test.cjs 最後單獨執行 26 passed。既有 Starlette TestClient 相容性警告仍存在。ruff 與 git diff --check 通過。
 - 瀏覽器人工驗收未完成：browser access host unavailable；使用者授權並還原 Chrome 後，工具仍因無法可靠辨識網址停止。使用者截圖確認編輯欄位與按鈕顯示，未將截圖列為儲存／恢復驗收。獨立測試服務使用 127.0.0.1:8011 與 temp/live-edit-smoke/data，不操作正式資料。
-- 未執行長音檔推論效能測試，辨識參數未變更；未提交、標記版本或推送。
+- 未執行長音檔推論效能測試，辨識參數未變更；編輯功能與後續規劃已於 143ee5d 提交並推送 origin/main，遠端已核對，沒有標記版本或建立 Release。

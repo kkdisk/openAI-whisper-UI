@@ -137,6 +137,43 @@ def test_corrupt_revision_blocks_display_but_preserves_raw(client):
     assert "原始辨识" in c.get(f"/api/jobs/{job_id}/export?variant=raw").text
 
 
+def test_pause_resume_api_confirmation_and_security(client):
+    import multiprocessing as mp
+
+    c, m = client
+    job_id, revisions_url = revision_job(c, m)
+    base = f"/api/jobs/{job_id}"
+    assert c.post(base + "/pause").status_code == 409
+    m.metas[job_id].status = Status.TRANSCRIBING
+    ctx = mp.get_context("spawn")
+    m.controls[job_id] = (ctx.Event(), ctx.Value("q", 0))
+    assert c.post(base + "/pause", headers={"X-CSRF-Token": "bad"}).status_code == 403
+    pending = c.post(base + "/pause").json()
+    assert pending["execution_state"] == "pause_requested"
+    assert c.post(base + "/pause").json()["control_seq"] == 1
+    assert c.post(base + "/resume").status_code == 409
+    with m.lock:
+        m.ack_control(job_id, {"sequence": 1, "state": "paused"})
+    assert c.get(base).json()["execution_state"] == "paused"
+    assert (
+        c.put(
+            revisions_url,
+            json={
+                "version": 0,
+                "row": {"key": "s:1", "text": "暫停中校稿"},
+            },
+        ).status_code
+        == 200
+    )
+    assert "暫停中校稿" in c.get(base + "/export").text
+    assert c.post(base + "/resume").json()["execution_state"] == "resume_requested"
+    with m.lock:
+        m.ack_control(job_id, {"sequence": 2, "state": "running"})
+    assert c.get(base).json()["execution_state"] == "running"
+    c.post(base + "/cancel")
+    assert c.post(base + "/resume").status_code == 409
+
+
 @pytest.fixture
 def client(tmp_path):
     settings = Settings(root=tmp_path, disk_reserve_bytes=0, max_upload_bytes=10)

@@ -26,6 +26,13 @@ class Status(str, Enum):
     INTERRUPTED = "interrupted"
 
 
+class ExecutionState(str, Enum):
+    RUNNING = "running"
+    PAUSE_REQUESTED = "pause_requested"
+    PAUSED = "paused"
+    RESUME_REQUESTED = "resume_requested"
+
+
 TERMINAL = {Status.COMPLETED, Status.CANCELLED, Status.FAILED, Status.INTERRUPTED}
 
 
@@ -80,6 +87,11 @@ class JobMeta(BaseModel):
     segment_count: int = 0
     uploaded_bytes: int = 0
     elapsed_sec: float = 0
+    active_elapsed_sec: float = 0
+    paused_sec: float = 0
+    execution_state: ExecutionState = ExecutionState.RUNNING
+    control_seq: int = 0
+    control_wait_sec: float = 0
     error: str | None = None
     error_code: str | None = None
     warnings: list[str] = Field(default_factory=list)

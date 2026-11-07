@@ -29,6 +29,30 @@ def crash_transcribe(path, request, settings, emit, cancelled):
     os._exit(7)
 
 
+def pausable_transcribe(path, request, settings, emit, cancelled):
+    from app.transcriber import controlled_segments
+
+    emit("status", {"status": "transcribing"})
+    emit("info", {"duration_sec": 30, "versions": {}, "model_revision": "test"})
+
+    def results():
+        for i in range(1, 31):
+            time.sleep(0.05)  # 模擬一次不可立即暫停的推論。
+            yield i
+
+    for i in controlled_segments(results(), cancelled):
+        emit(
+            "segment",
+            {
+                "segment_id": i,
+                "start_sec": i - 1,
+                "end_sec": i,
+                "raw_text": f"raw {i}",
+                "text": f"text {i}",
+            },
+        )
+
+
 def wait_terminal(manager, job_id, timeout=8):
     from app.schemas import TERMINAL
 
@@ -40,7 +64,11 @@ def wait_terminal(manager, job_id, timeout=8):
     raise AssertionError("工作程序未在期限內結束")
 
 
-def orphan_parent(marker, bind):
+def paused_test_worker(emit, cancelled):
+    cancelled.checkpoint()
+
+
+def orphan_parent(marker, bind, paused=False):
     import multiprocessing as mp
     from pathlib import Path
 
@@ -49,8 +77,19 @@ def orphan_parent(marker, bind):
     ctx = mp.get_context("spawn")
     receiver, sender = ctx.Pipe(duplex=False)
     gate, cancel = ctx.Event(), ctx.Event()
+    pause, sequence = ctx.Event(), ctx.Value("q", 1)
+    pause.set()
+    extra = (pause, sequence) if paused else ()
     process = ctx.Process(
-        target=worker_entry, args=(gate, cancel, sender, blocking_test_worker, ())
+        target=worker_entry,
+        args=(
+            gate,
+            cancel,
+            sender,
+            paused_test_worker if paused else blocking_test_worker,
+            (),
+            *extra,
+        ),
     )
     process.start()
     sender.close()

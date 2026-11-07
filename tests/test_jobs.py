@@ -188,7 +188,8 @@ def test_metadata_replace_retries_transient_lock(tmp_path, monkeypatch):
 @pytest.mark.windows
 @pytest.mark.skipif(os.name != "nt", reason="Windows 專用")
 @pytest.mark.parametrize("bind", [False, True])
-def test_parent_kill_leaves_no_worker(tmp_path, bind):
+@pytest.mark.parametrize("paused", [False, True])
+def test_parent_kill_leaves_no_worker(tmp_path, bind, paused):
     import ctypes
     import multiprocessing as mp
     from ctypes import wintypes
@@ -196,7 +197,7 @@ def test_parent_kill_leaves_no_worker(tmp_path, bind):
     from tests.helpers import orphan_parent
 
     marker = tmp_path / "pid.txt"
-    parent = mp.get_context("spawn").Process(target=orphan_parent, args=(str(marker), bind))
+    parent = mp.get_context("spawn").Process(target=orphan_parent, args=(str(marker), bind, paused))
     parent.start()
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]

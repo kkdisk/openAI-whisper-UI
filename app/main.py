@@ -242,7 +242,7 @@ def create_app(settings: Settings | None = None, manager: JobManager | None = No
         with manager.lock:
             rows = sorted(manager.metas.values(), key=lambda m: m.created_at, reverse=True)
             return {
-                "items": [m.model_copy(deep=True) for m in rows[offset : offset + limit]],
+                "items": [manager.get(m.job_id) for m in rows[offset : offset + limit]],
                 "total": len(rows),
                 "active_id": manager.active,
             }
@@ -253,7 +253,7 @@ def create_app(settings: Settings | None = None, manager: JobManager | None = No
             if manager.active:
                 return manager.get(manager.active)
             return (
-                max(manager.metas.values(), key=lambda m: m.created_at).model_copy(deep=True)
+                manager.get(max(manager.metas.values(), key=lambda m: m.created_at).job_id)
                 if manager.metas
                 else None
             )
@@ -274,6 +274,14 @@ def create_app(settings: Settings | None = None, manager: JobManager | None = No
     async def cancel(job_id: str):
         await asyncio.to_thread(manager.cancel, job_id)
         return manager.get(job_id)
+
+    @app.post("/api/jobs/{job_id}/pause")
+    async def pause(job_id: str):
+        return await asyncio.to_thread(manager.set_paused, job_id, True)
+
+    @app.post("/api/jobs/{job_id}/resume")
+    async def resume(job_id: str):
+        return await asyncio.to_thread(manager.set_paused, job_id, False)
 
     @app.get("/api/jobs/{job_id}/revisions")
     def revisions(job_id: str):

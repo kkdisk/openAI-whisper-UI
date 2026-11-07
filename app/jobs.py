@@ -16,7 +16,16 @@ from app.config import Settings
 from app.formatter import CONVERSION
 from app.models import model_path
 from app.process_control import JobObject, stop_process, worker_entry
-from app.schemas import TERMINAL, AppError, JobMeta, JobRequest, Status, TranscriptSegment, now_iso
+from app.schemas import (
+    TERMINAL,
+    AppError,
+    ExecutionState,
+    JobMeta,
+    JobRequest,
+    Status,
+    TranscriptSegment,
+    now_iso,
+)
 from app.transcriber import transcribe
 
 
@@ -29,6 +38,9 @@ class JobManager:
         self.active: str | None = None
         self.runtime = {}
         self.started = {}
+        self.controls = {}
+        self.paused_started = {}
+        self.control_requested = {}
         self.metas: dict[str, JobMeta] = {}
         self.segments: dict[str, list[TranscriptSegment]] = {}
         self.deadlines = {}
@@ -51,17 +63,33 @@ class JobManager:
             self.directory(job_id)
             if job_id not in self.metas:
                 raise AppError("not_found", "找不到任務。", 404)
-            result = self.metas[job_id].model_copy(deep=True)
-            if job_id in self.started:
-                result.elapsed_sec = time.monotonic() - self.started[job_id]
-            return result
+            return self.timing_snapshot(self.metas[job_id])
+
+    def timing_snapshot(self, meta):
+        result = meta.model_copy(deep=True)
+        now = time.monotonic()
+        job_id = meta.job_id
+        if job_id in self.started:
+            result.elapsed_sec = now - self.started[job_id]
+        if job_id in self.paused_started:
+            result.paused_sec += now - self.paused_started[job_id]
+        result.active_elapsed_sec = max(0, result.elapsed_sec - result.paused_sec)
+        result.control_wait_sec = (
+            now - self.control_requested[job_id] if job_id in self.control_requested else 0
+        )
+        return result
+
+    def end_pause(self, job_id):
+        start = self.paused_started.pop(job_id, None)
+        if start is not None:
+            self.metas[job_id].paused_sec += time.monotonic() - start
 
     def save(self, meta):
         meta.updated_at = now_iso()
         directory = self.directory(meta.job_id)
         temp = directory / "metadata.tmp"
         with temp.open("w", encoding="utf-8") as handle:
-            handle.write(meta.model_dump_json(indent=2))
+            handle.write(self.timing_snapshot(meta).model_dump_json(indent=2))
             handle.flush()
             os.fsync(handle.fileno())
         # Windows 讀取者／掃描器短暫持有檔案時，原子替換可能暫時被拒絕。
@@ -117,6 +145,8 @@ class JobManager:
                 warnings.append("已保存片段數與完成紀錄不符，結果可能遺失，請核對內容。")
             if meta.status not in TERMINAL:
                 meta.status = Status.INTERRUPTED
+            meta.execution_state = ExecutionState.RUNNING
+            meta.control_wait_sec = 0
             if warnings and meta.status == Status.COMPLETED:
                 meta.status = Status.INTERRUPTED
                 meta.error = "部分保存資料損毀，請核對已恢復內容。"
@@ -187,8 +217,13 @@ class JobManager:
             meta.status = Status.CANCELLED if meta.status == Status.CANCELLING else status
             meta.error = None if meta.status == Status.CANCELLED else error
             meta.error_code = None if meta.status == Status.CANCELLED else code
+            self.end_pause(job_id)
+            self.control_requested.pop(job_id, None)
+            meta.execution_state = ExecutionState.RUNNING
+            meta.control_wait_sec = 0
             if job_id in self.started:
                 meta.elapsed_sec = time.monotonic() - self.started.pop(job_id)
+            meta.active_elapsed_sec = max(0, meta.elapsed_sec - meta.paused_sec)
             try:
                 self.save(meta)
             finally:
@@ -207,10 +242,12 @@ class JobManager:
             ctx = mp.get_context("spawn")
             receiver, sender = ctx.Pipe(duplex=False)
             cancel, gate = ctx.Event(), ctx.Event()
+            pause, sequence = ctx.Event(), ctx.Value("q", 0)
             meta = self.metas[job_id]
             args = (self.directory(job_id) / "media.upload", meta.request, self.settings)
             process = ctx.Process(
-                target=worker_entry, args=(gate, cancel, sender, self.target, args)
+                target=worker_entry,
+                args=(gate, cancel, sender, self.target, args, pause, sequence),
             )
             job = None
             try:
@@ -220,6 +257,7 @@ class JobManager:
                 meta.status = Status.VALIDATING
                 self.save(meta)
                 self.runtime[job_id] = (process, cancel, job)
+                self.controls[job_id] = (pause, sequence)
                 self.started[job_id] = time.monotonic()
                 threading.Thread(target=self.monitor, args=(job_id, receiver), daemon=True).start()
                 gate.set()
@@ -231,6 +269,7 @@ class JobManager:
                 sender.close()
                 receiver.close()
                 self.runtime.pop(job_id, None)
+                self.controls.pop(job_id, None)
                 self.finish(job_id, Status.FAILED, "無法建立 Windows 工作程序保護。", "job_object")
                 raise AppError("job_object", "無法建立 Windows 工作程序保護。", 500) from exc
 
@@ -259,7 +298,9 @@ class JobManager:
                         break
                     if meta.status == Status.CANCELLING:
                         continue
-                    if kind == "status":
+                    if kind == "control":
+                        self.ack_control(job_id, payload)
+                    elif kind == "status":
                         stage = Status(payload["status"])
                         order = [
                             Status.VALIDATING,
@@ -308,8 +349,60 @@ class JobManager:
             receiver.close()
             with self.lock:
                 self.runtime.pop(job_id, None)
+                self.controls.pop(job_id, None)
                 self.metas[job_id].elapsed_sec = time.monotonic() - start
                 self.finish(job_id, outcome, error, code)
+
+    def set_paused(self, job_id, paused):
+        with self.lock:
+            meta = self.metas.get(job_id)
+            if meta is None:
+                self.get(job_id)
+            if meta.status != Status.TRANSCRIBING or job_id not in self.controls:
+                raise AppError("control_unavailable", "只能暫停或繼續正在轉錄的任務。", 409)
+            state = meta.execution_state
+            if paused and state in {ExecutionState.PAUSE_REQUESTED, ExecutionState.PAUSED}:
+                return self.get(job_id)
+            if not paused and state in {ExecutionState.RUNNING, ExecutionState.RESUME_REQUESTED}:
+                return self.get(job_id)
+            if state in {ExecutionState.PAUSE_REQUESTED, ExecutionState.RESUME_REQUESTED}:
+                raise AppError("control_pending", "請等待目前的暫停或繼續操作完成。", 409)
+            previous = meta.model_copy(deep=True)
+            meta.execution_state = (
+                ExecutionState.PAUSE_REQUESTED if paused else ExecutionState.RESUME_REQUESTED
+            )
+            meta.control_seq += 1
+            try:
+                self.save(meta)
+            except Exception:
+                self.metas[job_id] = previous
+                raise
+            event, sequence = self.controls[job_id]
+            with sequence.get_lock():
+                sequence.value = meta.control_seq
+                event.set() if paused else event.clear()
+            self.control_requested[job_id] = time.monotonic()
+            return self.get(job_id)
+
+    def ack_control(self, job_id, payload):
+        # 由 monitor 持鎖呼叫；忽略終態、取消及過期確認。
+        meta = self.metas[job_id]
+        if meta.status != Status.TRANSCRIBING or payload.get("sequence") != meta.control_seq:
+            return
+        expected = {
+            ExecutionState.PAUSE_REQUESTED: "paused",
+            ExecutionState.RESUME_REQUESTED: "running",
+        }.get(meta.execution_state)
+        if expected is None or payload.get("state") != expected:
+            return
+        if expected == "paused":
+            self.paused_started[job_id] = time.monotonic()
+            meta.execution_state = ExecutionState.PAUSED
+        else:
+            self.end_pause(job_id)
+            meta.execution_state = ExecutionState.RUNNING
+        self.control_requested.pop(job_id, None)
+        self.save(meta)
 
     def cancel(self, job_id):
         with self.lock:
@@ -319,6 +412,9 @@ class JobManager:
             if meta.status in TERMINAL or meta.status == Status.CANCELLING:
                 return
             meta.status = Status.CANCELLING
+            self.end_pause(job_id)
+            self.control_requested.pop(job_id, None)
+            meta.execution_state = ExecutionState.RUNNING
             self.save(meta)
             runtime = self.runtime.get(job_id)
             if runtime:

@@ -61,6 +61,22 @@ def decode_media(path: Path, max_duration_sec: int, cancelled=lambda: False):
     return np.concatenate(chunks).astype("float32") / 32768.0
 
 
+def controlled_segments(segments, cancelled):
+    """取下一筆前暫停；不丟棄已由原生推論產生的片段。"""
+    iterator = iter(segments)
+    while not cancelled():
+        checkpoint = getattr(cancelled, "checkpoint", None)
+        if checkpoint is not None and not checkpoint():
+            return
+        try:
+            segment = next(iterator)
+        except StopIteration:
+            return
+        if cancelled():
+            return
+        yield segment
+
+
 def transcribe(path: Path, request: JobRequest, settings: Settings, emit, cancelled):
     offline_mode()
     emit("status", {"status": "loading_model"})
@@ -111,7 +127,7 @@ def transcribe(path: Path, request: JobRequest, settings: Settings, emit, cancel
         return
     emit("status", {"status": "transcribing"})
     segments, _ = model.transcribe(audio, **options)
-    for i, segment in enumerate(segments, 1):
+    for i, segment in enumerate(controlled_segments(segments, cancelled), 1):
         if cancelled():
             return
         result = TranscriptSegment(

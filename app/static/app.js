@@ -7,6 +7,8 @@ let pendingRows = new Map();
 let rows = [], lastId = 0, generation = 0, modelsReady = false, historyOffset = 0;
 let activePollPending = false;
 let submitting = false;
+let controlPending = false;
+const executionLabels={pause_requested:"等待目前推論完成後暫停",paused:"已暫停轉錄",resume_requested:"繼續轉錄中…"};
 let editor = null;
 const workspaceStorageKey = "local-transcript.workspace-cleared";
 let workspaceCleared = false;
@@ -23,6 +25,11 @@ function canClearWorkspace(){ return !!selected&&terminal.has(selected.status)&&
 function updateButtons(){
   $("start").disabled=!!active||submitting||!modelsReady;
   $("cancel").disabled=!selected||selected.job_id!==active||selected.status==="cancelling";
+  const state=selected?.execution_state||"running";
+  const pending=state==="pause_requested"||state==="resume_requested";
+  $("pauseResume").disabled=controlPending||!selected||selected.job_id!==active||selected.status!=="transcribing"||pending;
+  $("pauseResume").textContent=state==="paused"?"繼續轉錄":state==="pause_requested"?"等待暫停…":state==="resume_requested"?"等待繼續…":"暫停轉錄";
+  $("pauseHint").textContent=!selected?"":selected.status==="transcribing"?state==="paused"?"模型與音訊仍占用記憶體，可繼續校稿。關閉服務後無法接續。":pending?(selected.control_wait_sec>=15?"仍在等待工作程序確認；可取消轉錄，已保存文字不受影響。":"正在等待工作程序確認，已產生的片段會先保存。"):"暫停會等待目前推論完成；不會立即中止原生運算。":"模型載入與解碼期間無法暫停；已結束的任務無法接續。";
   $("clearWorkspace").disabled=!canClearWorkspace();
   const hint=active||submitting||xhr?"有活動任務，請待完成或取消後再清除。":!selected?"請先開啟一份已結束的紀錄。":!terminal.has(selected.status)?"此任務尚未結束，暫時無法清除。":"只清空顯示，歷史結果保留。";
   $("clearWorkspace").title=hint;$("clearWorkspaceHint").textContent=hint;
@@ -66,17 +73,29 @@ async function restoreWorkspace(ticket=generation){
   }catch(error){if(ticket===generation&&!workspaceCleared)throw error;}
 }
 function showMeta(meta){
+  if(selected?.job_id===meta.job_id){
+    if(terminal.has(selected.status)&&!terminal.has(meta.status))return;
+    if(selected.status==="cancelling"&&meta.status!=="cancelling"&&!terminal.has(meta.status))return;
+    if(!terminal.has(meta.status)){
+      if((meta.control_seq??0)<(selected.control_seq??0))return;
+      if((meta.control_seq??0)===(selected.control_seq??0)&&
+        ((meta.execution_state==="pause_requested"&&selected.execution_state==="paused")||
+         (meta.execution_state==="resume_requested"&&selected.execution_state==="running")))return;
+    }
+  }
   selected=meta;
   if(!terminal.has(meta.status))active=meta.job_id;else if(active===meta.job_id)active=null;
   $("jobTitle").textContent=meta.request.title||meta.request.source_name;
-  $("status").textContent=labels[meta.status]||meta.status;
+  $("status").textContent=(meta.status==="transcribing"&&executionLabels[meta.execution_state])||labels[meta.status]||meta.status;
   const ratio=meta.duration_sec?Math.min(99,100*meta.last_position_sec/meta.duration_sec):null;
   if(meta.status==="completed")$("progress").value=100;
   else if(meta.status==="transcribing"&&ratio!==null)$("progress").value=ratio;
   else if(terminal.has(meta.status))$("progress").value=ratio||0;
   else $("progress").removeAttribute("value");
-  const eta=meta.status==="transcribing"&&meta.last_position_sec>=60&&meta.elapsed_sec>=10&&meta.duration_sec?time(Math.max(0,meta.elapsed_sec*(meta.duration_sec/meta.last_position_sec-1))):"估算中";
-  $("timing").textContent=`已保存位置 ${time(meta.last_position_sec)} / ${time(meta.duration_sec)} · 耗時 ${time(meta.elapsed_sec)} · 剩餘 ${terminal.has(meta.status)?"—":eta}（估計）`;
+  const activeElapsed=meta.active_elapsed_sec??meta.elapsed_sec;
+  const running=!meta.execution_state||meta.execution_state==="running";
+  const eta=meta.status==="transcribing"&&running&&meta.last_position_sec>=60&&activeElapsed>=10&&meta.duration_sec?time(Math.max(0,activeElapsed*(meta.duration_sec/meta.last_position_sec-1))):running?"估算中":"暫停估算";
+  $("timing").textContent=`已保存位置 ${time(meta.last_position_sec)} / ${time(meta.duration_sec)} · 總耗時 ${time(meta.elapsed_sec)} · 活動 ${time(activeElapsed)} · 暫停 ${time(meta.paused_sec??0)} · 剩餘 ${terminal.has(meta.status)?"—":eta}（估計）`;
   if(meta.error)message(meta.error);else if(meta.warnings.length)message(meta.warnings.join("\n"));
   document.querySelectorAll("[data-format]").forEach(b=>b.disabled=false);
   $("copy").disabled=!editedRows().length;updateButtons();
@@ -235,7 +254,7 @@ async function history(more=false){
     const row=document.createElement("div");row.className="historyrow";
     const name=document.createElement("button");name.className="secondary name";
     name.textContent=meta.request.title||meta.request.source_name;
-    const detail=document.createElement("small");detail.textContent=`${new Date(meta.created_at).toLocaleString()} · ${labels[meta.status]} · ${time(meta.last_position_sec)}`;
+    const detail=document.createElement("small");detail.textContent=`${new Date(meta.created_at).toLocaleString()} · ${(meta.status==="transcribing"&&executionLabels[meta.execution_state])||labels[meta.status]} · ${time(meta.last_position_sec)}`;
     name.append(detail);name.onclick=()=>selectJob(meta.job_id);row.append(name);
     if(terminal.has(meta.status)){const del=document.createElement("button");del.className="secondary delete";del.textContent="刪除";del.onclick=async()=>{if(!confirm("刪除這份本機結果？原始錄影不受影響。"))return;try{if(selected?.job_id===meta.job_id&&(editor?.inserting||!await flushEdits()))return;await api(`/api/jobs/${meta.job_id}`,{method:"DELETE"});if(selected?.job_id===meta.job_id)resetWorkspace({deleted:true});await history();}catch(e){message(e.message);}};row.append(del);}
     $("history").append(row);
@@ -267,6 +286,17 @@ $("form").onsubmit=async event=>{
   }catch(error){message(error.message);}finally{submitting=false;xhr=null;try{await history();}catch{}updateButtons();}
 };
 $("clearWorkspace").onclick=clearWorkspace;
+$("pauseResume").onclick=async()=>{
+  if(!selected||selected.job_id!==active||selected.status!=="transcribing"||controlPending)return;
+  const id=selected.job_id,ticket=generation,state=selected.execution_state||"running";
+  if(state!=="running"&&state!=="paused")return;
+  controlPending=true;updateButtons();
+  try{
+    const meta=await api(`/api/jobs/${id}/${state==="paused"?"resume":"pause"}`,{method:"POST"});
+    if(ticket===generation&&selected?.job_id===id)showMeta(meta);
+  }catch(error){if(ticket===generation)message(error.message);}
+  finally{controlPending=false;updateButtons();}
+};
 $("cancel").onclick=async()=>{
   if(!selected)return;
   const id=selected.job_id,ticket=generation;

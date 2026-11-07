@@ -86,7 +86,34 @@ class JobObject:
             self.handle = None
 
 
-def worker_entry(gate, cancel, sender, target, arguments):
+class CooperativeControl:
+    """取消可呼叫；checkpoint 僅在辨識迭代間合作暫停。"""
+
+    def __init__(self, cancel, pause, sequence, emit, parent=None):
+        self.cancel, self.pause, self.sequence = cancel, pause, sequence
+        self.emit, self.parent = emit, parent
+        self.acknowledged = None
+
+    def __call__(self):
+        return self.cancel.is_set()
+
+    def checkpoint(self):
+        while not self.cancel.is_set():
+            if self.parent is not None and not self.parent.is_alive():
+                return False
+            with self.sequence.get_lock():
+                seq, paused = self.sequence.value, self.pause.is_set()
+            state = "paused" if paused else "running"
+            if seq and self.acknowledged != (seq, state):
+                self.emit("control", {"sequence": seq, "state": state})
+                self.acknowledged = (seq, state)
+            if not paused:
+                return True
+            self.cancel.wait(0.1)
+        return False
+
+
+def worker_entry(gate, cancel, sender, target, arguments, pause=None, sequence=None):
     """綁定前不可載入引擎；父程序消失則退出。"""
     try:
         parent = mp.parent_process()
@@ -99,7 +126,12 @@ def worker_entry(gate, cancel, sender, target, arguments):
         def emit(kind, payload):
             sender.send((kind, payload))
 
-        target(*arguments, emit, cancel.is_set)
+        control = (
+            CooperativeControl(cancel, pause, sequence, emit, parent)
+            if pause is not None
+            else cancel.is_set
+        )
+        target(*arguments, emit, control)
         sender.send(("done", {}))
     except Exception as exc:
         from app.schemas import AppError
