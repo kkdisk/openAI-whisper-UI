@@ -8,7 +8,7 @@ const path = require("node:path");
 function setup({stored=null,blocked=false}={}){
   const elements = new Map();
   const values = new Map(stored===null?[]:[["local-transcript.workspace-cleared",stored]]);
-  const node = () => ({disabled:false,children:[],replaceChildren(...items){this.children=items;},append(...items){this.children.push(...items);},removeAttribute(){},focus(){this.focused=true;}});
+  const node = () => ({disabled:false,dataset:{},children:[],replaceChildren(...items){this.children=items;},append(...items){this.children.push(...items);},insertBefore(item,next){this.children.splice(this.children.indexOf(next),0,item);},setAttribute(){},removeAttribute(){},focus(){this.focused=true;}});
   const exports = [{format:"md"},{format:"txt"},{format:"txt",variant:"raw"},{format:"srt"}].map(dataset=>Object.assign(node(),{dataset}));
   const document = {
     getElementById(id){if(!elements.has(id))elements.set(id,node());return elements.get(id);},
@@ -16,7 +16,7 @@ function setup({stored=null,blocked=false}={}){
     createElement:node,
   };
   // Bootstrap remains pending; tests drive the actual UI functions with controlled responses.
-  const context = vm.createContext({document, fetch:()=>new Promise(()=>{}), setTimeout, setInterval:()=>0});
+  const context = vm.createContext({document, fetch:()=>new Promise(()=>{}), setTimeout, clearTimeout, setInterval:()=>0});
   Object.defineProperty(context,"sessionStorage",{get(){
     if(blocked)throw new Error("storage blocked");
     return {getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};
@@ -262,4 +262,110 @@ test("late export error does not refill the cleared warning area",async()=>{
   assert.equal(evaluate("clearWorkspace()"),true);
   finish({ok:false,json:async()=>({message:'late export error'})});await downloading;
   assert.equal(elements.get("message").textContent,"");
+});
+
+async function seedEditor(evaluate,status="transcribing",savedRows=[]){
+  await evaluate(`
+    var meta={job_id:"A",status:${JSON.stringify(status)},request:{title:"Meeting A"},duration_sec:100,last_position_sec:10,elapsed_sec:10,warnings:[]};
+    var calls=[];
+    api=async(path,options)=>{
+      calls.push({path,options});
+      if(path.endsWith("/revisions"))return {version:0,rows:${JSON.stringify(savedRows)}};
+      if(path.includes("/segments?"))return [{segment_id:1,start_sec:0,end_sec:5,text:"original"}];
+      if(path==="/api/jobs?offset=0&limit=50")return {items:[],total:0,active_id:null};
+      return meta;
+    };
+    var handlers={};EventSource=class{addEventListener(name,fn){handlers[name]=fn;}close(){}};
+    selectJob("A");
+  `);
+}
+
+test("stream completion and appended segments preserve the active edit control",async()=>{
+  const {evaluate,elements}=setup();await seedEditor(evaluate);
+  const input=elements.get("transcript").children[0].children[1].children[0];
+  input.value="corrected";input.oninput();
+  evaluate(`handlers.segment({data:JSON.stringify({segment_id:2,start_sec:5,end_sec:10,text:"later"})});`);
+  await evaluate(`meta={...meta,status:"completed"};handlers.done({data:"{}"});`);
+  assert.equal(elements.get("transcript").children[0].children[1].children[0],input);
+  assert.equal(input.value,"corrected");
+  assert.equal(evaluate("rows.length"),2);
+  assert.equal(evaluate("editor.dirty.get('s:1').text"),"corrected");
+  evaluate("clearTimeout(editor.timer)");
+});
+
+test("edits made during a save are serialized with the returned version",async()=>{
+  const {evaluate,elements}=setup();await seedEditor(evaluate);
+  const input=elements.get("transcript").children[0].children[1].children[0];
+  input.value="first";input.oninput();
+  evaluate(`var release;var bodies=[];api=async(path,options)=>{
+    bodies.push(JSON.parse(options.body));
+    if(bodies.length===1)return new Promise(resolve=>{release=resolve;});
+    return {version:2,rows:[]};
+  };var writing=flushEdits();`);
+  input.value="second";input.oninput();
+  evaluate(`release({version:1,rows:[]});`);
+  assert.equal(await evaluate("writing"),true);
+  assert.equal(evaluate("bodies[0].row.text"),"first");
+  assert.equal(evaluate("bodies[1].row.text"),"second");
+  assert.equal(evaluate("bodies[1].version"),1);
+  assert.equal(evaluate("editor.dirty.size"),0);
+  evaluate("clearTimeout(editor.timer)");
+});
+
+test("save failure blocks navigation and clearing until successful retry",async()=>{
+  const {evaluate,elements}=setup();await seedEditor(evaluate,"completed");
+  const input=elements.get("transcript").children[0].children[1].children[0];
+  input.value="keep me";input.oninput();
+  evaluate(`api=async()=>{throw new Error("disk full");};`);
+  assert.equal(await evaluate("selectJob('B')"),false);
+  assert.equal(evaluate("selected.job_id"),"A");
+  assert.equal(evaluate("clearWorkspace()"),false);
+  assert.equal(input.value,"keep me");
+  assert.match(elements.get("saveStatus").textContent,/disk full/);
+  await evaluate(`api=async()=>({version:1,rows:[]});flushEdits();`);
+  assert.equal(evaluate("editor.dirty.size"),0);
+  assert.equal(evaluate("clearWorkspace()"),true);
+});
+
+test("restored edits, inserted rows and deletion agree with copied content",async()=>{
+  const {evaluate,elements}=setup();await seedEditor(evaluate,"completed",[
+    {key:"u:abc",anchor:0,text:"intro",deleted:false,start_sec:null,end_sec:null},
+    {key:"s:1",anchor:0,text:"corrected",deleted:true},
+  ]);
+  assert.equal(elements.get("transcript").children.length,2);
+  assert.equal(evaluate("editedRows().length"),1);
+  assert.equal(evaluate("editedRows()[0].text"),"intro");
+  const source=elements.get("transcript").children[1].children[1];
+  assert.equal(source.children[0].disabled,true);
+  source.children[1].children[0].onclick();
+  assert.equal(evaluate("editedRows()[1].text"),"corrected");
+  source.children[1].children[1].onclick();
+  assert.equal(evaluate("editedRows()[1].text"),"original");
+  evaluate("clearTimeout(editor.timer)");
+});
+
+test("inserting before an existing segment retains source order and later appends",async()=>{
+  const {evaluate,elements}=setup();await seedEditor(evaluate,"completed");
+  await evaluate(`api=async(path,options)=>({version:1,rows:[{...JSON.parse(options.body).row,key:"u:new"}]});insertSentence(0);`);
+  assert.equal(elements.get("transcript").children[0].dataset.key,"u:new");
+  assert.equal(evaluate("editedRows().length"),2);
+  evaluate(`append({segment_id:2,start_sec:5,end_sec:10,text:"later"});`);
+  assert.equal(elements.get("transcript").children.length,3);
+});
+
+test("revision load failure blocks corrected export but still permits the raw backup",async()=>{
+  const {evaluate,exports,context}=setup();
+  await evaluate(`
+    api=async path=>{
+      if(path.endsWith("/revisions"))throw new Error("revision corrupt");
+      return {job_id:"A",status:"completed",request:{title:"A"},warnings:[]};
+    };selectJob("A");
+  `);
+  let fetched=[];
+  context.fetch=async path=>{fetched.push(path);return {ok:false,json:async()=>({message:"test stops before download"})};};
+  await exports[0].onclick();
+  assert.equal(fetched.length,0);
+  await exports[2].onclick();
+  assert.equal(fetched.length,1);
+  assert.match(fetched[0],/variant=raw/);
 });

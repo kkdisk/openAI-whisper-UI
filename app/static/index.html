@@ -68,6 +68,7 @@
           <div class="format-actions" role="group" aria-label="其他匯出格式"><span>其他格式</span><button class="secondary" data-format="txt" disabled>TXT</button><button class="secondary" data-format="txt" data-variant="raw" disabled>原始 TXT</button><button class="secondary" data-format="srt" disabled>SRT</button></div>
         </div>
         <p class="hint export-note">MD 已附 AI 整理指示 · 結果不會自動送至外部 AI · 重要術語與決議請回查</p>
+        <div class="editing-bar"><span class="hint">可直接修訂已轉出的句子；新結果會繼續追加。新增句未填時間時，SRT 須先補齊起訖秒數。</span><div><button id="addFirst" type="button" class="secondary" disabled>開頭新增語句</button><span id="saveStatus" role="status" aria-live="polite"></span><button id="retrySave" type="button" class="secondary" hidden>重試儲存</button></div></div>
         <div class="transcript-columns" aria-hidden="true"><span>時間</span><span>辨識內容</span></div>
         <div id="transcript" class="transcript" tabindex="0" aria-label="逐字稿預覽"><div class="empty"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z"/><path d="M14 3v6h6M8 13h8m-8 4h5"/></svg></span><h3>從一段錄音開始</h3><p>完成一段，就會在這裡留下帶時間戳的文字。</p></div></div>
       </section>

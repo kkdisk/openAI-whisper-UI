@@ -20,6 +20,7 @@ from app.config import ROOT, Settings
 from app.formatter import export, export_name
 from app.jobs import JobManager
 from app.models import list_models, offline_mode
+from app.revisions import RevisionWrite, read_revisions, revised_segments, write_revision
 from app.schemas import (
     TERMINAL,
     AppError,
@@ -274,6 +275,27 @@ def create_app(settings: Settings | None = None, manager: JobManager | None = No
         await asyncio.to_thread(manager.cancel, job_id)
         return manager.get(job_id)
 
+    @app.get("/api/jobs/{job_id}/revisions")
+    def revisions(job_id: str):
+        with manager.lock:
+            manager.get(job_id)
+            return read_revisions(manager.directory(job_id))
+
+    @app.put("/api/jobs/{job_id}/revisions")
+    async def revise(job_id: str, request: Request):
+        body = await read_json(request, settings.max_json_bytes)
+        try:
+            change = RevisionWrite.model_validate(body)
+        except ValidationError as exc:
+            raise AppError("invalid_revision", "修訂格式不正確或文字過長。", 422) from exc
+
+        def save_revision():
+            with manager.lock:
+                manager.get(job_id)
+                return write_revision(manager.directory(job_id), manager.segments[job_id], change)
+
+        return await asyncio.to_thread(save_revision)
+
     @app.delete("/api/jobs/{job_id}", status_code=204)
     async def delete(job_id: str):
         await asyncio.to_thread(manager.delete, job_id)
@@ -286,6 +308,8 @@ def create_app(settings: Settings | None = None, manager: JobManager | None = No
         with manager.lock:
             meta = manager.get(job_id)
             rows = list(manager.segments[job_id])
+            if variant != "raw":
+                rows = revised_segments(rows, read_revisions(manager.directory(job_id)))
         text = await asyncio.to_thread(export, meta, rows, format, variant == "raw")
         name = quote(export_name(meta, format, variant == "raw"))
         return Response(

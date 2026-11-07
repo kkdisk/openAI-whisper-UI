@@ -77,7 +77,9 @@ def export_name(meta: JobMeta, fmt: str, raw: bool = False) -> str:
 
 def transcript_body(segments: list[TranscriptSegment], raw: bool = False) -> str:
     return "\n".join(
-        f"[{timestamp(s.start_sec)}] {s.raw_text if raw else s.text}" for s in segments
+        f"[{timestamp(s.start_sec) if math.isfinite(s.start_sec) else '時間未設定'}] "
+        f"{s.raw_text if raw else s.text}"
+        for s in segments
     )
 
 
@@ -92,6 +94,10 @@ def export(meta: JobMeta, segments: list[TranscriptSegment], fmt: str, raw: bool
                 and math.isfinite(s.end_sec)
                 and 0 <= s.start_sec <= s.end_sec
             ):
+                if s.segment_id == 0:
+                    raise AppError(
+                        "invalid_timestamp", "人工新增語句須先填寫完整起訖秒數，才能匯出 SRT。"
+                    )
                 raise AppError("invalid_timestamp", f"片段 {s.segment_id} 時間異常，無法匯出 SRT。")
             # 空行會中斷 SRT 區塊，字幕文字僅折成單行，不變更辨識內容。
             text = " ".join(s.text.splitlines())

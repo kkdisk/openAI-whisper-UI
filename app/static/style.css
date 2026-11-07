@@ -256,6 +256,15 @@ progress:not([value]) { appearance: auto; }
 .transcript { min-height: 400px; max-height: max(400px, calc(100dvh - 340px)); overflow: auto; scrollbar-color: var(--border-input) transparent; scrollbar-width: thin; }
 .segment { font-size: 16px; line-height: 1.85; padding: 14px 12px; border-bottom: 1px solid var(--surface-subtle); white-space: pre-wrap; overflow-wrap: anywhere; transition: border-color .12s; }
 .segment:hover { background: var(--row-hover); }
+.editing-bar { padding: 12px 0; }
+.editing-bar > div, .edit-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+#saveStatus { font-size: 12px; color: var(--muted); }
+.segment-editor { min-width: 0; }
+.segment-editor textarea { width: 100%; resize: vertical; min-height: 70px; line-height: 1.7; font: inherit; }
+.edit-tools button { padding: 4px 8px; font-size: 12px; }
+.edit-tools input { width: 125px; padding: 4px 8px; font-size: 12px; }
+.segment-editor textarea:disabled { text-decoration: line-through; opacity: .6; }
+.inserted { border-left: 3px solid var(--border-input); }
 .segment time { justify-self: start; align-self: start; padding: 3px 6px; margin-top: 4px; border-radius: 5px; background: var(--surface-subtle); color: var(--muted); font-size: 11px; line-height: 1.7; font-family: "Cascadia Mono", Consolas, monospace; font-variant-numeric: tabular-nums; }
 .empty { padding: 90px 16px; text-align: center; }
 .empty-mark { display: grid; place-items: center; width: 58px; height: 58px; margin: 0 auto 18px; border-radius: 16px; background: var(--accent-surface); color: var(--empty-ink); }
