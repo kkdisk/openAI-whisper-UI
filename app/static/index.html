@@ -17,7 +17,7 @@
         <div><h1>會議逐字稿</h1><span class="brand-caption">LOCAL TRANSCRIPT</span></div>
       </div>
       <div class="header-actions">
-        <span class="badge"><span class="status-dot" aria-hidden="true"></span>本機離線<span class="badge-detail"> · CPU 處理</span></span>
+        <span class="badge"><span class="status-dot" aria-hidden="true"></span>本機離線<span class="badge-detail"> · CPU / GPU</span></span>
         <label class="theme-control"><span class="sr-only">顯示模式</span><select id="theme" aria-label="顯示模式"><option value="system">跟隨系統</option><option value="light">淺色模式</option><option value="dark">深色模式</option></select></label>
       </div>
     </div>
@@ -45,9 +45,12 @@
           <label>語言<select id="language"><option value="zh">中文（可混用英文）</option><option value="auto">自動偵測（開頭）</option><option value="mixed">中英交替（分段偵測，實驗）</option><option value="en">英文</option></select></label>
           <label>模型<select id="model"><option>檢查中…</option></select></label>
           <p id="modelHelp" class="hint model-help"></p>
+          <label>運算裝置<select id="device"><option value="auto">自動（優先 GPU）</option><option value="cpu">CPU</option><option value="cuda">NVIDIA GPU</option></select></label>
+          <label>GPU 精度<select id="computeType"><option value="auto">自動</option><option value="int8_float16">INT8 / FP16</option><option value="float16">FP16</option></select></label>
+          <p class="hint">自動模式在首段產生前可回退 CPU；指定 GPU 失敗會回報。CPU 使用 INT8。</p>
           <label>專有名詞<span class="optional">選填</span><textarea id="terms" rows="2" maxlength="4000" placeholder="CyteSi、GLT、API、產品型號"></textarea><small>作為辨識提示，非強制替換。完整提示上限 200 tokens，過長會提示縮短。</small></label>
           <label class="check"><input id="traditional" type="checkbox" checked>保守簡轉繁，保留原始辨識文字供下載</label>
-          <details class="settings-details"><summary>進階辨識設定</summary><label>CPU 執行緒<select id="threads"><option>4</option><option>6</option><option>8</option></select></label><label class="check"><input id="previousContext" type="checkbox" checked>參考前文，維持上下文連貫</label><p class="hint">出現連續重複或語言切換後漏字時，可關閉後比較短樣本；可能影響用詞一致性。分段偵測以模型音訊視窗判斷語言，不保證每句切換皆正確。</p></details>
+          <details class="settings-details"><summary>進階辨識設定</summary><label>GPU 編號<input id="deviceIndex" type="number" min="0" max="31" step="1" value="0"></label><p class="hint">多張顯卡時指定編號，預設使用 0。</p><label>CPU 執行緒<select id="threads"><option>4</option><option>6</option><option>8</option></select></label><label class="check"><input id="previousContext" type="checkbox" checked>參考前文，維持上下文連貫</label><p class="hint">出現連續重複或語言切換後漏字時，可關閉後比較短樣本；可能影響用詞一致性。分段偵測以模型音訊視窗判斷語言，不保證每句切換皆正確。</p></details>
         </fieldset>
         </div>
         <button id="start" class="start-button" type="submit" disabled><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 10 7-10 7V5Z"/></svg>開始轉錄</button>

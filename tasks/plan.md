@@ -1,5 +1,7 @@
 # 實作計畫：本機離線會議逐字稿工具
 
+> 2026-11-07 M7 接續：已完成裝置選擇、可選 Windows GPU 執行庫、限時診斷、首段前程序回退與 small 實機控制回歸；small／medium／turbo 九組短語音比較均成功。此輪規格、切片與驗收依 gpu-development-handoff.md 第 4 節執行；使用者確認可運作並授權以 v0.5.0 提交推送與新建 tag，既有 tag 不移動。接續以代表性中英長錄音補品質與資源／故障矩陣，再接 H20。詳細結果以 validation.md 最末節為準。
+
 > 建立日期：2026-11-06。狀態：v0.1.0 已提交；R01 長檔轉錄完成、品質驗收未完成。M6～M9 多數仍待實作；turbo CPU 選項已先加入。證據見 [validation.md](validation.md)。
 > 需求依據：[SPEC.md](../SPEC.md)。執行清單：[todo.md](todo.md)。
 

@@ -96,6 +96,7 @@ function showMeta(meta){
   const running=!meta.execution_state||meta.execution_state==="running";
   const eta=meta.status==="transcribing"&&running&&meta.last_position_sec>=60&&activeElapsed>=10&&meta.duration_sec?time(Math.max(0,activeElapsed*(meta.duration_sec/meta.last_position_sec-1))):running?"估算中":"暫停估算";
   $("timing").textContent=`已保存位置 ${time(meta.last_position_sec)} / ${time(meta.duration_sec)} · 總耗時 ${time(meta.elapsed_sec)} · 活動 ${time(activeElapsed)} · 暫停 ${time(meta.paused_sec??0)} · 剩餘 ${terminal.has(meta.status)?"—":eta}（估計）`;
+  $("status").textContent+=` · 選擇 ${meta.request.device||"cpu"} · 實際 ${meta.actual_device||(meta.request.device&&meta.request.device!=="cpu"?"待確認":"cpu")} / ${meta.compute_type||"int8"}${meta.actual_device_index!=null?" · GPU "+meta.actual_device_index:""}${meta.fallback_reason?" · 已回退 CPU（"+meta.fallback_reason+"）":""}`;
   if(meta.error)message(meta.error);else if(meta.warnings.length)message(meta.warnings.join("\n"));
   document.querySelectorAll("[data-format]").forEach(b=>b.disabled=false);
   $("copy").disabled=!editedRows().length;updateButtons();
@@ -280,7 +281,7 @@ $("form").onsubmit=async event=>{
   submitting=true;updateButtons();
   try{
     if(editor&&!await flushEdits())return;
-    const meta=await api("/api/jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({source_name:file.name,expected_bytes:file.size,title:$("title").value,meeting_date:$("date").value,participants:$("participants").value,terms:$("terms").value,model:$("model").value,language:$("language").value,condition_on_previous_text:$("previousContext").checked,cpu_threads:Number($("threads").value),traditional:$("traditional").checked})});
+    const meta=await api("/api/jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({source_name:file.name,expected_bytes:file.size,title:$("title").value,meeting_date:$("date").value,participants:$("participants").value,terms:$("terms").value,model:$("model").value,device:$("device").value||"auto",compute_type:$("computeType").value||"auto",device_index:Number($("deviceIndex").value||0),language:$("language").value,condition_on_previous_text:$("previousContext").checked,cpu_threads:Number($("threads").value),traditional:$("traditional").checked})});
     active=meta.job_id;await selectJob(meta.job_id);await history();
     await new Promise((resolve,reject)=>{xhr=new XMLHttpRequest();xhr.open("PUT",`/api/jobs/${meta.job_id}/media`);xhr.setRequestHeader("Content-Type","application/octet-stream");xhr.setRequestHeader("X-CSRF-Token",csrf);xhr.upload.onprogress=e=>{if(selected?.job_id===meta.job_id&&e.lengthComputable){$("progress").value=e.loaded/e.total*100;$("timing").textContent=`上傳 ${Math.round(e.loaded/e.total*100)}%（與轉錄進度分開）`;}};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300)resolve();else{let text="上傳失敗";try{text=JSON.parse(xhr.responseText).message;}catch{}reject(new Error(text));}};xhr.onerror=()=>reject(new Error("上傳連線中斷。"));xhr.onabort=()=>reject(new Error("上傳已中止。"));xhr.send(file);});
   }catch(error){message(error.message);}finally{submitting=false;xhr=null;try{await history();}catch{}updateButtons();}

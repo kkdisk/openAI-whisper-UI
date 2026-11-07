@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import TRANSCRIPTION_MODELS, Settings
+from app.devices import select_device
 from app.formatter import timestamp
 from app.models import model_path, offline_mode
 from app.schemas import JobRequest
@@ -45,6 +46,11 @@ def main():
     parser.add_argument("--output", type=Path, required=True, help="新的結果目錄，不覆蓋既有資料")
     parser.add_argument("--model", choices=TRANSCRIPTION_MODELS, default="large-v3-turbo")
     parser.add_argument("--threads", type=int, choices=(4, 6, 8), default=8)
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument(
+        "--compute-type", choices=("auto", "int8_float16", "float16"), default="auto"
+    )
+    parser.add_argument("--device-index", type=int, default=0)
     parser.add_argument(
         "--profiles", nargs="+", choices=[*PROFILES, *PROMPT_PROFILES], default=list(PROFILES)
     )
@@ -59,10 +65,10 @@ def main():
     from faster_whisper import WhisperModel
 
     load_start = time.perf_counter()
+    selection = select_device(args.device, args.compute_type, args.device_index)
     model = WhisperModel(
         str(directory),
-        device="cpu",
-        compute_type="int8",
+        **selection.model_kwargs(),
         cpu_threads=args.threads,
         local_files_only=True,
     )
@@ -95,8 +101,10 @@ def main():
         "duration_sec": len(audio) / 16000,
         "model": args.model,
         "revision": json.loads((directory / "ready.json").read_text("utf-8"))["revision"],
-        "device": "cpu",
-        "compute_type": "int8",
+        "device": selection.device,
+        "device_index": selection.device_index,
+        "compute_type": model.model.compute_type,
+        "requested_compute_type": args.compute_type,
         "threads": args.threads,
         "seed": args.seed,
         "platform": platform.platform(),

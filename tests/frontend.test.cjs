@@ -79,6 +79,8 @@ test("new transcription sends mixed language and context selection",async()=>{
     $("file").files=[{name:"meeting.wav",size:3}];
     $("language").value="mixed";$("previousContext").checked=false;
     $("threads").value="8";$("model").value="large-v3-turbo";
+    $("device").value="cuda";$("computeType").value="float16";
+    $("deviceIndex").value="1";
     var submitted;
     api=async(path,options)=>{
       if(options?.method==="POST"){
@@ -92,6 +94,9 @@ test("new transcription sends mixed language and context selection",async()=>{
   assert.equal(evaluate("submitted.language"),"mixed");
   assert.equal(evaluate("submitted.condition_on_previous_text"),false);
   assert.equal(evaluate("submitted.model"),"large-v3-turbo");
+  assert.equal(evaluate("submitted.device"),"cuda");
+  assert.equal(evaluate("submitted.compute_type"),"float16");
+  assert.equal(evaluate("submitted.device_index"),1);
 });
 
 function seedCompleted(evaluate,status="completed"){

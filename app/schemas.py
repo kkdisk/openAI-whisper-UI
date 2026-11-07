@@ -45,6 +45,9 @@ class JobRequest(BaseModel):
     participants: str = Field(default="", max_length=2000)
     terms: str = Field(default="", max_length=4000)
     model: ModelName = "small"
+    device: Literal["auto", "cpu", "cuda"] = "cpu"
+    compute_type: Literal["auto", "int8_float16", "float16"] = "auto"
+    device_index: int = Field(default=0, ge=0, le=31, strict=True)
     language: Literal["zh", "auto", "en", "mixed"] = "zh"
     condition_on_previous_text: bool = True
     cpu_threads: Literal[4, 6, 8] = 4
@@ -101,6 +104,9 @@ class JobMeta(BaseModel):
     beam_size: int = 5
     vad_filter: bool = True
     compute_type: str = "int8"
+    actual_device: str | None = None
+    actual_device_index: int | None = None
+    fallback_reason: str | None = None
 
 
 class AppError(Exception):

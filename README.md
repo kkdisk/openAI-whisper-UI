@@ -1,12 +1,33 @@
 # 本機離線會議逐字稿
 
-Windows 本機 Web UI，使用 faster-whisper CPU INT8 辨識中文及英文專有名詞。主要輸出帶時間戳 TXT 與附 AI 整理指示的 Markdown，另可下載 SRT。音檔及文字不會由本工具上傳外部服務。
+Windows 本機 Web UI，使用 faster-whisper CPU INT8 或 NVIDIA GPU 辨識中文及英文專有名詞。主要輸出帶時間戳 TXT 與附 AI 整理指示的 Markdown，另可下載 SRT。音檔及文字不會由本工具上傳外部服務。
 
-目前版本：**v0.4.0**。加入轉錄期間文字修訂、新增／刪除、自動儲存與修訂匯出，以及 H10 暫停／繼續、控制確認與活動／暫停計時。保留既有模型、語言與比較工具；預設辨識參數不變。使用者已回報人工驗收通過；H10 的真實模型暫停延遲／資源量測仍待完成。關閉服務後續跑、GPU 與說話者分離尚未實作。
+目前版本：**v0.5.0**。加入 GPU 自動／手動選擇、診斷及首段前故障回退；RTX 2060 上 small／medium／large-v3-turbo 短語音 CPU、GPU INT8／FP16 與 FP16 均已通過。使用者已確認此版本可以運作；代表性長錄音品質／資源與剩餘故障矩陣仍待驗證。保留文字修訂與 H10 暫停／繼續；關閉服務後續跑及說話者分離尚未實作。
 
 ## 日常使用
 
-要換到 NVIDIA GPU 電腦接續開發，先讀 [GPU 開發交接](tasks/gpu-development-handoff.md)：包含目前進度、技術決策、環境重建及不隨 Git 搬移的模型／資料。GPU 功能尚未實作。
+GPU 工作區進度、環境與驗收邊界見 [GPU 開發交接](tasks/gpu-development-handoff.md) 及 [驗證紀錄](tasks/validation.md)。
+
+### GPU 環境及裝置選擇
+
+先停止服務，再為 Windows NVIDIA 電腦安裝鎖定的可選執行庫；CPU 電腦仍可只執行一般 `uv sync --locked --group dev`。
+
+```powershell
+uv sync --locked --group dev --extra gpu
+.\.venv\Scripts\python.exe scripts\diagnose_gpu.py
+# 使用 30 秒內、包含實際語音的本機檔案，完整消費辨識結果：
+.\.venv\Scripts\python.exe scripts\diagnose_gpu.py --audio path\to\speech.wav
+```
+
+GPU extra 固定 NVIDIA cuBLAS 12.6.4.1／cuDNN 9.5.1.17 的 Windows wheels；既有引擎與 Python 版本不變。程式只在 GPU 路徑註冊目前虛擬環境的 DLL，不修改系統 PATH 或驅動；日常啟動不安裝／下載。之後同步或重裝環境時仍須帶 `--extra gpu`，否則 uv 會移除可選執行庫。安裝依據為 [NVIDIA Windows cuDNN 文件](https://docs.nvidia.com/cudnn/installation/backend/windows/)，本機相容性以實際推論驗證。
+
+UI 預設「自動（優先 GPU）」；可指定 CPU 或 NVIDIA GPU，並選 GPU INT8／FP16 或 FP16。進階設定可指定 GPU 編號，預設 0，不自動挑選空閒卡。API 缺少新欄位時仍按舊 CPU 行為讀取。裝置、實際精度與回退原因保存在任務及 TXT／MD 中；CTranslate2 在此 CPU 實測會把 INT8 以 `int8_float32` 執行。
+
+auto 對首段保存前可分類的 CUDA 裝置／精度／DLL／顯存故障，最多換一個乾淨 CPU 工作程序；缺模型、提示超限、壞檔及未分類崩潰不回退。指定 cuda 時失敗即回報；已有片段後的 CUDA 故障保留原稿及人工修訂，不自動重跑或降模型。暫停仍占用 RAM／VRAM。
+
+診斷預設以 60 秒逾時隔離子程序；無 `--audio` 時只證明模型載入，不能當作推論成功。可用 `--model`、`--compute-type`、`--device-index` 選擇；輸出含程序 RAM 峰值及整張卡的 VRAM 取樣峰值，後者含其他程序且可能漏掉尖峰。
+
+比較工具亦支援 `--device cpu` 或 `--device cuda --compute-type int8_float16`（或 `float16`）及 `--device-index`，沿用相同裝置政策，保存來源 SHA-256、revision、實際精度、載入／解碼／推論時間。比較工具刻意不自動回退，失敗的 GPU 組不會冒充 CPU 組。
 
 完成下方「首次安裝／重建環境」、備妥 `.venv` 與 `small` 模型後，可雙擊 `start.bat`，或在 PowerShell 執行（模型與虛擬環境不包含在 Git 倉庫內）：
 

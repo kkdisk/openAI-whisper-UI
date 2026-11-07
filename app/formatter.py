@@ -115,6 +115,10 @@ def export(meta: JobMeta, segments: list[TranscriptSegment], fmt: str, raw: bool
         f"最後已保存時間：{timestamp(meta.last_position_sec)}\n"
         f"音軌時長：{timestamp(meta.duration_sec) if meta.duration_sec is not None else '未知'}\n"
         f"模型：{meta.request.model}／{meta.model_revision or '未知 revision'}\n"
+        f"裝置選擇：{meta.request.device}；GPU 精度選擇：{meta.request.compute_type}\n"
+        f"實際裝置：{meta.actual_device or ('cpu' if meta.request.device == 'cpu' else '尚未確認')}"
+        f"；索引：{meta.actual_device_index if meta.actual_device_index is not None else '—'}"
+        f"；精度：{meta.compute_type}；回退原因：{meta.fallback_reason or '無'}\n"
         f"語言：{meta.request.language}；轉換：{meta.conversion}\n"
         f"參考前文：{'開啟' if meta.request.condition_on_previous_text else '關閉'}\n"
     )

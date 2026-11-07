@@ -290,3 +290,44 @@ Git 初始化時，本機 main 追蹤 `https://github.com/kkdisk/openAI-whisper-
 - 保存硬體／相依快照、v0.4.0 邊界、GPU 診斷／自動選擇／回退計畫、來源文件、品質實驗結論、程式入口、模型 revision、忽略資料搬移清單與新機開始指令。GPU 型號／顯存尚未知，未將既有條件式 RTX 2060 規劃當成新機實測。
 - 所有 Markdown 本機文件連結檢查通過，git diff --check 通過；本輪僅文件，不重跑功能測試，不變更相依與版號。前輪 94 passed 的證據保留，不冒稱為本輪重跑。
 - 提交前遠端 main 為 80df32b79f7b16ae604fd076e73cd8f89d90a8b8，v0.4.0 tag 及 peeled commit 已核對。本輪只推送 main，不新增／移動 tag 或建立 Release；不包含 models、data、temp、錄音、完整逐字稿及瀏覽器 profiles。
+
+## M7 GPU 第一輪實作與實機驗證（2026-11-07，工作區尚未發行）
+
+- 本輪依 gpu-development-handoff.md 第 4 節進行：先診斷及 small，再接裝置政策／程序回退、medium／turbo 短檔比較與生命週期回歸。規格、依賴、程式入口、切片及驗收沿用該節並同步 SPEC 13.4；H20 尚未開始。
+- 本機實測 NVIDIA GeForce RTX 2060、6144 MiB、驅動 621.01，CUDA count 1。專案執行檔為 `D:\Code\AI_generate_Code\openAI-whisper-UI\.venv\Scripts\python.exe`，Python 3.10.11；faster-whisper 1.2.1／CTranslate2 4.8.5／PyAV 16.1.0／onnxruntime 1.23.2 不變。
+- 初始模型可載入 GPU，但真正消費語音 generator 時發現 `cublas64_12.dll` 無法載入。加入並安裝可選 `gpu` extra：NVIDIA 官方 Windows wheels cuBLAS 12.6.4.1／cuDNN 9.5.1.17，鎖檔只增加兩項可選套件，未升級既有套件。GPU 工作程序只註冊目前 venv 的 DLL 目錄及程序 PATH，未更動系統 PATH、驅動或全域 CUDA。安裝方式依 [NVIDIA Windows cuDNN 文件](https://docs.nvidia.com/cudnn/installation/backend/windows/)；實際依賴另按 [faster-whisper GPU 說明](https://github.com/SYSTRAN/faster-whisper#gpu) 及本機推論核對。
+- small、medium、large-v3-turbo 已按交接的固定 revision 準備；各模型的來源／權重雜湊、tokenizer／VAD 與 CPU 離線載入通過。模型留在忽略的 models；完整 large-v3 尚未支援。
+- `app/devices.py` 集中裝置、支援精度、GPU index 與錯誤分類。新 UI 預設 auto，API／舊任務缺欄位時預設 CPU；CPU 路徑不初始化／查詢 CUDA。GPU auto 精度依支援優先 int8_float16、其次 float16，實際精度由引擎回報。任務及 TXT／MD 保存要求裝置、實際裝置／index、要求與實際精度及 fallback_reason。多卡預設明確 index 0，UI 進階、API、診斷及比較 CLI 可指定；未在多卡實機驗收。
+- auto 僅在首段保存前、可分類 CUDA 錯誤時，等待原程序停止後換乾淨 CPU 程序一次。明確 cuda、非 CUDA 錯誤、已保存片段、取消及未知崩潰不回退；不降低模型、不覆蓋原稿／修訂。測試以真實 Windows spawn／不同 PID 驗證回退、原子保存／重啟讀取及媒體清理；首段後 CUDA 故障保稿、延遲 generator 故障、取消不回退等通過。注入 OOM／DLL 等只算邏輯驗證，不宣稱實機 OOM 已驗收。
+- `scripts/diagnose_gpu.py` 預設 60 秒限時隔離；無音訊時僅回報模型載入，提供最長 30 秒語音才消費完整 generator，非空文字才回報 inference passed。區分缺裝置／精度／DLL／OOM、逾時與子程序崩潰。診斷含程序 CPU 秒、RAM 生命週期峰值及整卡 VRAM 取樣；整卡數字含其他程序且可能漏掉尖峰，不能當作模型獨占顯存。
+
+### 固定短樣本與 CPU／GPU 比較
+
+- 本機 SAPI Microsoft Zira Desktop 產生 11.11475 秒英文語音，包含 API、26 及否定句，不使用私人錄音、不連網合成。來源 SHA-256 `b38f568d6a546b443a270b3ea26abf4450664095255c11fea3ec84fbc540ee10`。短素材與所有輸出位於忽略的 `temp/gpu-validation/`。
+- 三模型各跑 CPU、GPU int8_float16、GPU float16，共九組。固定來源指紋、各模型 revision、baseline 選項、auto 開頭語言偵測、前文開啟、beam 5、VAD、中文引導提示、8 CPU threads、seed 42；只改模型／裝置／精度。引擎在本機 CPU 將要求的 int8 以 int8_float32 執行，紀錄保存實際值。
+
+| 模型 | CPU 實際 INT8／FP32 | CUDA INT8／FP16 | CUDA FP16 |
+|---|---:|---:|---:|
+| small | 4.37 秒 | 1.14 秒 | 1.10 秒 |
+| medium | 15.18 秒 | 1.98 秒 | 1.71 秒 |
+| large-v3-turbo | 24.84 秒 | 1.52 秒 | 1.73 秒 |
+
+- 表中只計推論、不含載入／解碼；三者另有 manifest 記錄載入／解碼時間。每組一次，背景負載／溫度未控制，並非正式速度基準或固定倍速承諾。small 三組文字一致，含否定句、API、26；此為合成英文流程驗證，不是中英會議品質接受，也不代表大模型品質提升。
+- 獨立診斷的 RAM 峰值（MiB）／整卡 VRAM 取樣峰值（MiB）：small INT8／FP16 約 848／2307、FP16 700／1844；medium 1896／2362、1697／3291；turbo 2033／2459、1782／3390。取樣基線分別保存於 diagnostic JSON，背景占用不同；不據此比較不同精度的淨顯存或推估長檔需求。
+
+### 任務／控制／前端與完整回歸
+
+- small 的明確 cuda int8_float16、明確 cuda float16 及 auto 均以真正 JobManager／Windows 工作程序完成；實際裝置 cuda index 0、非空原文、TXT／MD／SRT、終態清理及重啟讀取通過。
+- 以同短語音重複為約 111 秒的控制素材，small 真實 GPU 反覆暫停／繼續兩次，暫停後片段數不增加，最後在已有片段且再次暫停時取消；部分稿與裝置紀錄可恢復。一次測試的兩次確認等待約 0.406／3.891 秒，只作觀察，非延遲保證；未量測暫停各狀態的 CPU／RAM，因此 H10 整項仍不勾選。既有 Windows 父程序死亡清理回歸通過，尚未獨立完成 GPU 模型占用時的父程序強制死亡接受。
+- 隔離 Chrome 與 localhost:8766，測試資料寫在 temp/gpu-validation/browser-data，未讀寫使用者正式 data/jobs。確認 UI 預設 auto、原始 File 上傳至 small 真實 CUDA、SSE 逐段與完成、實際精度顯示、人工修改保存、MD 匯出包含修訂／cuda、重新整理恢復修訂。1366×768、390×844、320×844 無水平溢出，Runtime 例外 0；截圖與 browser-result.json 留在忽略目錄。這是自動瀏覽器驗證，非使用者人工接受。
+- 使用明確專案 Python，設定 WHISPER_TEST_AUDIO 為上述合成音檔，並把已存在的 Codex runtime Node 加入本次測試程序 PATH：`python -m pytest --real-model --gpu -q` 為 **116 passed、無略過**，46.32 秒；保留既有 Starlette TestClient 棄用警告 1 項。GPU 測試預設跳過，必須明確 `--gpu`；一般 CPU-only 執行不要求 GPU。
+- Ruff check／format、app.js／theme.js Node 語法及 `uv lock --check --offline --cache-dir .uv-cache` 通過。程式版本仍 0.4.0，沒有 commit／tag／push／CI／GitHub Release；新 GPU 功能不列為已發行。
+- 待完成：代表性中英／長錄音、人工標準稿與品質接受、真實資源競爭／OOM／GPU 硬崩潰及父程序死亡、GPU 下 SSE 故障重連矩陣、暫停分狀態資源量測、多卡實機與完整 large-v3。M7 整體仍未完成；之後接 H20 回聽校稿。
+
+## v0.5.0 提交前檢查及使用者接受（2026-11-07）
+
+- 使用者回報「ok 可以運作」，並明確要求 git commit／push／tag，據此記錄本次 GPU 版本使用者接受；未逐項列出模型、錄音或操作案例，不將此回報延伸為長錄音品質或所有故障情境已通過。
+- 版號同步 README、pyproject.toml、uv.lock 為 0.5.0。交付範圍為 GPU 裝置／精度選擇、Windows 可選執行庫、診斷與比較工具、程序回退、任務／匯出紀錄及對應測試／文件；模型、錄音、逐字稿、瀏覽器設定檔及 temp 產物均不提交。
+- 本輪重跑 `.venv\Scripts\python.exe -m pytest --real-model --gpu -q`：**116 passed、無略過，42.11 秒**。沿用本機合成語音 WHISPER_TEST_AUDIO 與明確 Node 路徑，包含真實 CPU 模型／MP4、CUDA 兩種精度與 auto、GPU 暫停／繼續／取消，以及 Windows 程序與前端回歸。保留既有 Starlette TestClient 棄用警告 1 項。
+- Ruff check、Ruff format --check（29 檔）、兩個前端 JS 語法、`uv lock --check --offline --cache-dir .uv-cache` 與 `git diff --check` 均通過。模型權重與依賴版本保持前節驗證組合，既有 GPU／長檔品質等未驗收範圍不因標記版號而勾選。
+- 提交前遠端 main 核對為 f9f6dcb5f795ca48031e14e8bb5843a7a6acd1ad，尚無 v0.5.0；本次交付 refs 僅 main 與新 annotated tag v0.5.0，不移動 v0.1.0～v0.4.0。不建立 GitHub Release 或 EXE。遠端 CI 狀態 Unknown：本輪未執行或取得遠端 CI 結果，不將本機測試當作 CI 通過。

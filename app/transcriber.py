@@ -5,6 +5,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from app.config import Settings
+from app.devices import CUDA_ERRORS, cuda_error, select_device
 from app.formatter import convert_text
 from app.models import model_path, offline_mode
 from app.schemas import AppError, JobRequest, TranscriptSegment
@@ -78,6 +79,26 @@ def controlled_segments(segments, cancelled):
 
 
 def transcribe(path: Path, request: JobRequest, settings: Settings, emit, cancelled):
+    selection = select_device(request.device, request.compute_type, request.device_index)
+    emit(
+        "device",
+        {
+            "actual_device": selection.device,
+            "actual_device_index": selection.device_index if selection.device == "cuda" else None,
+            "compute_type": selection.compute_type,
+            "fallback_reason": selection.fallback_reason,
+        },
+    )
+    try:
+        _transcribe(path, request, settings, emit, cancelled, selection)
+    except Exception as exc:
+        code = cuda_error(exc) if selection.device == "cuda" else None
+        if code:
+            raise AppError(code, CUDA_ERRORS[code]) from exc
+        raise
+
+
+def _transcribe(path, request, settings, emit, cancelled, selection):
     offline_mode()
     emit("status", {"status": "loading_model"})
     from faster_whisper import WhisperModel
@@ -93,12 +114,24 @@ def transcribe(path: Path, request: JobRequest, settings: Settings, emit, cancel
     directory = model_path(settings, request.model)
     model = WhisperModel(
         str(directory),
-        device="cpu",
-        compute_type="int8",
+        **selection.model_kwargs(),
         cpu_threads=request.cpu_threads,
         local_files_only=True,
     )
     options = transcription_options(request)
+    underlying = getattr(model, "model", None)
+    if underlying is not None:
+        emit(
+            "device",
+            {
+                "actual_device": selection.device,
+                "actual_device_index": selection.device_index
+                if selection.device == "cuda"
+                else None,
+                "compute_type": str(underlying.compute_type),
+                "fallback_reason": selection.fallback_reason,
+            },
+        )
     prompt = options["initial_prompt"]
     tokens = model.hf_tokenizer.encode(" " + prompt.strip()).ids
     if len(tokens) > settings.prompt_tokens:

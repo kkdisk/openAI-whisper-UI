@@ -8,9 +8,16 @@ import pytest
 
 def pytest_addoption(parser):
     parser.addoption("--real-model", action="store_true", help="執行本機真實模型測試")
+    parser.addoption("--gpu", action="store_true", help="明確啟用實機 CUDA 語音測試")
 
 
 def pytest_collection_modifyitems(config, items):
+    if not config.getoption("--gpu"):
+        for item in items:
+            if "gpu" in item.keywords:
+                item.add_marker(
+                    pytest.mark.skip(reason="需 --gpu 及本機 NVIDIA／GPU 執行庫／語音素材")
+                )
     if not config.getoption("--real-model"):
         for item in items:
             if "real_model" in item.keywords:

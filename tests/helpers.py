@@ -29,6 +29,32 @@ def crash_transcribe(path, request, settings, emit, cancelled):
     os._exit(7)
 
 
+def cuda_failure_transcribe(path, request, settings, emit, cancelled):
+    from app.schemas import AppError
+
+    with (settings.root / "attempts.txt").open("a") as handle:
+        handle.write(f"{os.getpid()} {request.device}\n")
+    device = "cpu" if request.device == "cpu" else "cuda"
+    emit(
+        "device",
+        {
+            "actual_device": device,
+            "actual_device_index": 0 if device == "cuda" else None,
+            "compute_type": "int8" if device == "cpu" else "int8_float16",
+        },
+    )
+    if device == "cpu":
+        fake_transcribe(path, request, settings, emit, cancelled)
+        return
+    emit("status", {"status": "transcribing"})
+    if request.title == "after_segment":
+        fake_transcribe(path, request, settings, emit, cancelled)
+    if request.title == "wait_cancel":
+        while not cancelled():
+            time.sleep(0.01)
+    raise AppError(request.terms or "cuda_oom", "模擬故障")
+
+
 def pausable_transcribe(path, request, settings, emit, cancelled):
     from app.transcriber import controlled_segments
 

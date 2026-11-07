@@ -13,6 +13,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.config import Settings
+from app.devices import CUDA_ERRORS
 from app.formatter import CONVERSION
 from app.models import model_path
 from app.process_control import JobObject, stop_process, worker_entry
@@ -239,44 +240,49 @@ class JobManager:
             if self.metas[job_id].status != Status.UPLOADING:
                 self.finish(job_id, Status.CANCELLED)
                 return
-            ctx = mp.get_context("spawn")
-            receiver, sender = ctx.Pipe(duplex=False)
-            cancel, gate = ctx.Event(), ctx.Event()
-            pause, sequence = ctx.Event(), ctx.Value("q", 0)
-            meta = self.metas[job_id]
-            args = (self.directory(job_id) / "media.upload", meta.request, self.settings)
-            process = ctx.Process(
-                target=worker_entry,
-                args=(gate, cancel, sender, self.target, args, pause, sequence),
-            )
-            job = None
-            try:
-                process.start()
-                sender.close()
-                job = JobObject(process)
-                meta.status = Status.VALIDATING
-                self.save(meta)
-                self.runtime[job_id] = (process, cancel, job)
-                self.controls[job_id] = (pause, sequence)
-                self.started[job_id] = time.monotonic()
-                threading.Thread(target=self.monitor, args=(job_id, receiver), daemon=True).start()
-                gate.set()
-            except Exception as exc:
-                if process.pid is not None:
-                    stop_process(process, cancel, 0)
-                if job is not None:
-                    job.close()
-                sender.close()
-                receiver.close()
-                self.runtime.pop(job_id, None)
-                self.controls.pop(job_id, None)
-                self.finish(job_id, Status.FAILED, "無法建立 Windows 工作程序保護。", "job_object")
-                raise AppError("job_object", "無法建立 Windows 工作程序保護。", 500) from exc
+            self.launch(job_id, self.metas[job_id].request)
+
+    def launch(self, job_id, request):
+        # 呼叫者持有 lock；回退只在舊工作程序已退出後建立乾淨程序。
+        ctx = mp.get_context("spawn")
+        receiver, sender = ctx.Pipe(duplex=False)
+        cancel, gate = ctx.Event(), ctx.Event()
+        pause, sequence = ctx.Event(), ctx.Value("q", 0)
+        meta = self.metas[job_id]
+        args = (self.directory(job_id) / "media.upload", request, self.settings)
+        process = ctx.Process(
+            target=worker_entry,
+            args=(gate, cancel, sender, self.target, args, pause, sequence),
+        )
+        job = None
+        try:
+            process.start()
+            sender.close()
+            job = JobObject(process)
+            meta.status = Status.VALIDATING
+            self.save(meta)
+            self.runtime[job_id] = (process, cancel, job)
+            self.controls[job_id] = (pause, sequence)
+            self.started.setdefault(job_id, time.monotonic())
+            threading.Thread(target=self.monitor, args=(job_id, receiver), daemon=True).start()
+            gate.set()
+        except Exception as exc:
+            if process.pid is not None:
+                stop_process(process, cancel, 0)
+            if job is not None:
+                job.close()
+            sender.close()
+            receiver.close()
+            self.runtime.pop(job_id, None)
+            self.controls.pop(job_id, None)
+            self.finish(job_id, Status.FAILED, "無法建立 Windows 工作程序保護。", "job_object")
+            raise AppError("job_object", "無法建立 Windows 工作程序保護。", 500) from exc
 
     def monitor(self, job_id, receiver):
         process, cancel, job = self.runtime[job_id]
         start = time.monotonic()
         outcome, error, code = Status.FAILED, "工作程序意外結束。", "worker_exit"
+        retry = False
         try:
             while True:
                 if not receiver.poll(0.1):
@@ -295,10 +301,25 @@ class JobManager:
                         break
                     if kind == "error":
                         error, code = payload["message"], payload["code"]
+                        retry = (
+                            meta.request.device == "auto"
+                            and meta.actual_device == "cuda"
+                            and meta.fallback_reason is None
+                            and code in CUDA_ERRORS
+                            and meta.segment_count == 0
+                            and meta.status != Status.CANCELLING
+                        )
                         break
                     if meta.status == Status.CANCELLING:
                         continue
-                    if kind == "control":
+                    if kind == "device":
+                        meta.actual_device = payload["actual_device"]
+                        meta.actual_device_index = payload["actual_device_index"]
+                        meta.compute_type = payload["compute_type"]
+                        if payload.get("fallback_reason"):
+                            meta.fallback_reason = payload["fallback_reason"]
+                        self.save(meta)
+                    elif kind == "control":
                         self.ack_control(job_id, payload)
                     elif kind == "status":
                         stage = Status(payload["status"])
@@ -344,14 +365,38 @@ class JobManager:
                 self.metas[job_id].warnings.append(diagnostic)
             outcome, error, code = Status.FAILED, "無法保存或接收轉錄結果。", "storage_or_ipc"
         finally:
-            stop_process(process, cancel, self.settings.cancel_grace_sec)
+            stopped = stop_process(process, cancel, self.settings.cancel_grace_sec)
             job.close()
             receiver.close()
             with self.lock:
                 self.runtime.pop(job_id, None)
                 self.controls.pop(job_id, None)
                 self.metas[job_id].elapsed_sec = time.monotonic() - start
-                self.finish(job_id, outcome, error, code)
+                meta = self.metas[job_id]
+                if (
+                    retry
+                    and stopped
+                    and meta.status not in TERMINAL
+                    and meta.status != Status.CANCELLING
+                ):
+                    self.end_pause(job_id)
+                    self.control_requested.pop(job_id, None)
+                    meta.execution_state = ExecutionState.RUNNING
+                    meta.fallback_reason = code
+                    meta.actual_device = None
+                    meta.actual_device_index = None
+                    try:
+                        self.save(meta)
+                        self.launch(job_id, meta.request.model_copy(update={"device": "cpu"}))
+                    except Exception:
+                        self.finish(
+                            job_id,
+                            Status.FAILED,
+                            "無法建立或保存 CPU 回退任務。",
+                            "fallback_failed",
+                        )
+                else:
+                    self.finish(job_id, outcome, error, code)
 
     def set_paused(self, job_id, paused):
         with self.lock:
