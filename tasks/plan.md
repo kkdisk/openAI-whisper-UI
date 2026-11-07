@@ -159,6 +159,8 @@ Windows 與真實模型測試依 M0 定義的標記分開執行並報告，記�
 
 ### M7：裝置選擇與模型實測
 
+2026-11-07 最新優先順序：使用者將轉移到有 GPU 的電腦，先進行 M7 環境診斷及自動裝置選擇，再接 H20 回聽校稿。具體接續順序、已核對技術資訊、來源 revision 與搬移步驟見 [GPU 開發交接](gpu-development-handoff.md)。新機型號／顯存尚未確認，不能將 RTX 2060 視為既定硬體。
+
 - 在白名單及離線準備流程加入 large-v3-turbo／large-v3；模型與結果按 revision／run 保存。舊 small 模型及既有記錄仍可使用，實測前不改預設。
 - CPU small／medium 固定 INT8；有 RTX 2060 實機時，四種模型先固定 int8_float16、相同 beam／VAD／提示比較；FP16 另測，禁止用不同硬體的時間直接推估模型加速倍數。
 - 既有 small／medium 已備妥，可先做比較；turbo 準備完成後追加 CPU INT8，GPU 再比較四模型。turbo 是主要速度／品質候選，large-v3 是品質優先對照；CPU 預設與 medium 是否保留由實測決定，不預設 medium 過時。

@@ -276,3 +276,17 @@ Git 初始化時，本機 main 追蹤 `https://github.com/kkdisk/openAI-whisper-
 - Ruff check、Ruff format --check（24 個 Python 檔）、app.js／theme.js 的 Node 語法檢查、`uv lock --check --offline --cache-dir .uv-cache` 及 `git diff --check` 通過。此專案為原始碼啟動，未產生 EXE 或新增發行安裝包。
 - 真實模型測試驗證一般辨識路徑，沒有量測真實模型暫停延遲／CPU／RAM；H10 控制驗證使用相同受控迭代器的子程序替身。瀏覽器人工接受及完整長會議校稿仍待完成，H10／H.G 保持未勾選。關閉服務後續跑、H20～H50 及 GPU／說話者分離未在此版完成。
 - 不包含模型、音檔、逐字稿與忽略目錄下測試產物。Git 推送與標籤不代表 CI、GitHub Release 或上述人工接受通過；此次未要求建立 GitHub Release。
+
+## v0.4.0 使用者人工接受（2026-11-07）
+
+- 交付結果：80df32b 已推送 origin/main，v0.4.0 annotated tag peeled commit 一致，遠端舊標籤未變。以下補充交付後的人工接受結果，不改寫前述交付時的驗證邊界。
+- 使用者明確回報「人工驗收 ok」並附深色介面截圖，據此記錄使用者人工接受通過。截圖呈現已完成、音軌／已保存位置 00:05:53、總耗時／活動 00:04:49、暫停 00:00:00、修訂已儲存，以及文字編輯與匯出控制。
+- 使用者未逐項列出操作案例；不將截圖當成暫停／繼續時序、重啟接續、CPU／RAM 或辨識準確率的量測證據。H10 真實模型暫停延遲與資源量測仍保留，H20～H50 未完成；不修改已接受的介面。
+- 本次僅更新驗收與進度文件，執行 git diff --check；未變更功能程式，未重跑測試，未新增或移動標籤。
+
+## GPU 換機開發交接（2026-11-07）
+
+- 使用者要求保存目前計畫與 AI 專案知識並 commit／push，以便換到有 GPU 的電腦接續。交接入口為 gpu-development-handoff.md，另同步 README、人工輔助規劃、plan／todo 與上述使用者人工接受紀錄。
+- 保存硬體／相依快照、v0.4.0 邊界、GPU 診斷／自動選擇／回退計畫、來源文件、品質實驗結論、程式入口、模型 revision、忽略資料搬移清單與新機開始指令。GPU 型號／顯存尚未知，未將既有條件式 RTX 2060 規劃當成新機實測。
+- 所有 Markdown 本機文件連結檢查通過，git diff --check 通過；本輪僅文件，不重跑功能測試，不變更相依與版號。前輪 94 passed 的證據保留，不冒稱為本輪重跑。
+- 提交前遠端 main 為 80df32b79f7b16ae604fd076e73cd8f89d90a8b8，v0.4.0 tag 及 peeled commit 已核對。本輪只推送 main，不新增／移動 tag 或建立 Release；不包含 models、data、temp、錄音、完整逐字稿及瀏覽器 profiles。
