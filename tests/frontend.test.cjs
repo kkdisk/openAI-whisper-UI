@@ -375,6 +375,27 @@ test("revision load failure blocks corrected export but still permits the raw ba
   assert.match(fetched[0],/variant=raw/);
 });
 
+test("raw backup bypasses failed or pending revision writes and retains local edits",async()=>{
+  const {evaluate,exports,context}=setup();await seedEditor(evaluate,"completed");
+  evaluate(`
+    editor.dirty.set("s:1",{key:"s:1",text:"keep local edit"});
+    api=async()=>{throw new Error("revision conflict");};
+  `);
+  const fetched=[];
+  context.fetch=async path=>{fetched.push(path);return {ok:false,json:async()=>({message:"test stops before download"})};};
+  await exports[0].onclick();
+  assert.equal(fetched.length,0);
+  assert.match(evaluate("editor.error"),/revision conflict/);
+  await exports[2].onclick();
+  assert.equal(fetched.length,1);
+  assert.match(fetched[0],/variant=raw/);
+  evaluate(`editor.saving=new Promise(()=>{});editor.inserting=true;`);
+  await exports[2].onclick();
+  assert.equal(fetched.length,2);
+  assert.equal(evaluate("editor.dirty.get('s:1').text"),"keep local edit");
+  assert.match(evaluate("editor.error"),/revision conflict/);
+});
+
 test("pause waits for acknowledgement, resumes separately and does not wait for edit saves",async()=>{
   const {evaluate,elements}=setup();await seedEditor(evaluate);
   evaluate(`

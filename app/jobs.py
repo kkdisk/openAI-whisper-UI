@@ -460,17 +460,21 @@ class JobManager:
             self.end_pause(job_id)
             self.control_requested.pop(job_id, None)
             meta.execution_state = ExecutionState.RUNNING
-            self.save(meta)
-            runtime = self.runtime.get(job_id)
-            if runtime:
-                process, event, _ = runtime
-                threading.Thread(
-                    target=stop_process,
-                    args=(process, event, self.settings.cancel_grace_sec),
-                    daemon=True,
-                ).start()
-            elif job_id not in self.receiving:
-                self.finish(job_id, Status.CANCELLED)
+            try:
+                self.save(meta)
+            finally:
+                # 保存失敗仍須送出取消；否則 CANCELLING 會阻擋重試並占住活動槽位。
+                runtime = self.runtime.get(job_id)
+                if runtime:
+                    process, event, _ = runtime
+                    event.set()
+                    threading.Thread(
+                        target=stop_process,
+                        args=(process, event, self.settings.cancel_grace_sec),
+                        daemon=True,
+                    ).start()
+                elif job_id not in self.receiving:
+                    self.finish(job_id, Status.CANCELLED)
 
     def expire(self):
         with self.lock:
@@ -487,8 +491,10 @@ class JobManager:
             del self.segments[job_id]
 
     def close(self):
-        if self.active:
-            self.cancel(self.active)
-        deadline = time.monotonic() + 5
-        while self.runtime and time.monotonic() < deadline:
-            time.sleep(0.05)
+        try:
+            if self.active:
+                self.cancel(self.active)
+        finally:
+            deadline = time.monotonic() + 5
+            while self.runtime and time.monotonic() < deadline:
+                time.sleep(0.05)

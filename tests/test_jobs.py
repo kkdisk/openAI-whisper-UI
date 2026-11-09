@@ -59,6 +59,66 @@ def test_upload_cancel_keeps_slot_until_closed(tmp_path):
     assert manager.active is None and not path.exists()
 
 
+@pytest.mark.parametrize("persistent", [False, True])
+def test_cancel_storage_failure_releases_pending_upload(tmp_path, monkeypatch, persistent):
+    manager = make(tmp_path)
+    meta = manager.create(request())
+    path = manager.directory(meta.job_id) / "media.upload"
+    path.write_bytes(b"abc")
+    save = manager.save
+
+    def failing_save(meta):
+        if persistent or meta.status == Status.CANCELLING:
+            raise PermissionError("metadata unavailable")
+        save(meta)
+
+    monkeypatch.setattr(manager, "save", failing_save)
+    with pytest.raises(PermissionError):
+        manager.cancel(meta.job_id)
+    assert manager.get(meta.job_id).status == Status.CANCELLED
+    assert manager.active is None
+    assert not path.exists()
+    monkeypatch.setattr(manager, "save", save)
+    manager.cancel(meta.job_id)
+    assert manager.create(request()).status == Status.UPLOADING
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(os.name != "nt", reason="Windows 專用")
+@pytest.mark.parametrize("operation", ["cancel", "close"])
+def test_cancel_storage_failure_still_stops_worker(tmp_path, monkeypatch, operation):
+    manager = make(tmp_path, blocked_transcribe)
+    meta = manager.create(request())
+    upload(manager, meta.job_id)
+    save = manager.save
+    try:
+        deadline = time.monotonic() + 5
+        while manager.get(meta.job_id).segment_count == 0:
+            assert time.monotonic() < deadline
+            time.sleep(0.02)
+        process, event, _ = manager.runtime[meta.job_id]
+
+        def failing_save(meta):
+            if meta.status == Status.CANCELLING:
+                raise PermissionError("metadata unavailable")
+            save(meta)
+
+        monkeypatch.setattr(manager, "save", failing_save)
+        with pytest.raises(PermissionError):
+            manager.close() if operation == "close" else manager.cancel(meta.job_id)
+        assert event.is_set()
+        result = wait_terminal(manager, meta.job_id)
+        process.join(2)
+        assert not process.is_alive()
+        assert result.status == Status.CANCELLED and result.segment_count == 1
+        assert manager.active is None
+        assert not (manager.directory(meta.job_id) / "media.upload").exists()
+        assert make(tmp_path).get(meta.job_id).status == Status.CANCELLED
+    finally:
+        monkeypatch.setattr(manager, "save", save)
+        manager.close()
+
+
 @pytest.mark.windows
 @pytest.mark.skipif(os.name != "nt", reason="Windows 專用")
 @pytest.mark.parametrize("target", [fake_transcribe, crash_transcribe, blocked_transcribe])

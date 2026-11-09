@@ -329,8 +329,10 @@ $("copy").onclick=async()=>{
 document.querySelectorAll("[data-format]").forEach(button=>button.onclick=async()=>{
   if(!selected)return;
   const ticket=generation;
-  if(editor?.inserting||(editor&&!editor.ready&&button.dataset.variant!=="raw"))return;
-  if(editor&&!await flushEdits())return;
+  if(button.dataset.variant!=="raw"){
+    if(editor?.inserting||(editor&&!editor.ready))return;
+    if(editor&&!await flushEdits())return;
+  }
   if(ticket!==generation||!selected)return;
   try{
     const response=await fetch(`/api/jobs/${selected.job_id}/export?format=${button.dataset.format}&variant=${button.dataset.variant||"display"}`);
