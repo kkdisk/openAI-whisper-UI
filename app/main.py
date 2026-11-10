@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import secrets
 import socket
@@ -24,6 +25,7 @@ from app.revisions import RevisionWrite, read_revisions, revised_segments, write
 from app.schemas import (
     TERMINAL,
     AppError,
+    ContinueRequest,
     ErrorResponse,
     JobRequest,
     ProgressData,
@@ -83,6 +85,11 @@ class LocalAccess:
             await send(message)
 
         await self.app(scope, receive, safe_send)
+
+
+def write_chunk(handle, digest, chunk):
+    handle.write(chunk)
+    digest.update(chunk)
 
 
 async def read_json(request, limit):
@@ -174,6 +181,7 @@ def create_app(settings: Settings | None = None, manager: JobManager | None = No
         expected = manager.get(job_id).request.expected_bytes
         started, last = time.monotonic(), time.monotonic()
         size = 0
+        digest = hashlib.sha256()
         failure = None
         handle = None
         stream = request.stream().__aiter__()
@@ -200,12 +208,13 @@ def create_app(settings: Settings | None = None, manager: JobManager | None = No
                     size += len(chunk)
                     if size > expected or size > settings.max_upload_bytes:
                         raise AppError("size_limit", "實際檔案大小超過宣告或限制。", 413)
-                    await asyncio.to_thread(handle.write, chunk)
+                    await asyncio.to_thread(write_chunk, handle, digest, chunk)
                     await asyncio.to_thread(manager.upload_progress, job_id, size)
                     last = now
                 pending = asyncio.create_task(stream.__anext__())
             if size != expected:
                 raise AppError("size_mismatch", "收到的檔案大小與宣告不符。")
+            await asyncio.to_thread(manager.record_source, job_id, digest.hexdigest())
         except BaseException as exc:
             failure = exc
         finally:
@@ -236,6 +245,17 @@ def create_app(settings: Settings | None = None, manager: JobManager | None = No
             raise AppError("upload_failed", "上傳中斷或磁碟寫入失敗。") from failure
         await asyncio.to_thread(manager.start, job_id)
         return manager.get(job_id)
+
+    @app.post("/api/jobs/{job_id}/continue", status_code=201)
+    async def continue_job(job_id: str, request: Request):
+        if request.headers.get("content-type", "").split(";")[0] != "application/json":
+            raise AppError("content_type", "續跑必須使用 JSON。", 415)
+        body = await read_json(request, settings.max_json_bytes)
+        try:
+            data = ContinueRequest.model_validate(body)
+        except ValidationError as exc:
+            raise AppError("invalid_parameter", "請檢查檔案大小、模型及設定。", 422) from exc
+        return await asyncio.to_thread(manager.continue_job, job_id, data)
 
     @app.get("/api/jobs")
     async def jobs(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)):

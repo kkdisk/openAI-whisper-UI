@@ -34,6 +34,7 @@ class ExecutionState(str, Enum):
 
 
 TERMINAL = {Status.COMPLETED, Status.CANCELLED, Status.FAILED, Status.INTERRUPTED}
+CONTINUABLE = {Status.CANCELLED, Status.FAILED, Status.INTERRUPTED}
 
 
 class JobRequest(BaseModel):
@@ -52,6 +53,35 @@ class JobRequest(BaseModel):
     condition_on_previous_text: bool = True
     cpu_threads: Literal[4, 6, 8] = 4
     traditional: bool = True
+
+
+class ContinueRequest(BaseModel):
+    """從已保存位置續跑；未提供的設定沿用原任務。"""
+
+    model_config = ConfigDict(extra="forbid")
+    expected_bytes: int = Field(gt=0, strict=True)
+    model: ModelName | None = None
+    device: Literal["auto", "cpu", "cuda"] | None = None
+    compute_type: Literal["auto", "int8_float16", "float16"] | None = None
+    device_index: int | None = Field(default=None, ge=0, le=31, strict=True)
+    cpu_threads: Literal[4, 6, 8] | None = None
+
+
+class Continuation(BaseModel):
+    """一次續跑的紀錄；接縫在 from_sec 附近，需人工回聽。"""
+
+    from_sec: float
+    first_segment_id: int
+    model: str
+    device: str
+    cpu_threads: int
+    created_at: str = Field(default_factory=now_iso)
+    previous_status: str
+    prior_elapsed_sec: float = 0
+    prior_active_elapsed_sec: float = 0
+    prior_paused_sec: float = 0
+    prior_actual_device: str | None = None
+    source_check: Literal["pending", "sha256", "size_duration"] = "pending"
 
 
 class TranscriptSegment(BaseModel):
@@ -107,6 +137,8 @@ class JobMeta(BaseModel):
     actual_device: str | None = None
     actual_device_index: int | None = None
     fallback_reason: str | None = None
+    source_sha256: str | None = None
+    continuations: list[Continuation] = Field(default_factory=list)
 
 
 class AppError(Exception):

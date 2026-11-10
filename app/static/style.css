@@ -219,7 +219,7 @@ button {
 }
 button:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 button:disabled { opacity: .46; cursor: default; }
-button[hidden] { display: none; }
+button[hidden], input[hidden] { display: none; }
 .secondary { background: var(--input-bg); color: var(--text-tertiary); border-color: var(--secondary-border); font-weight: 500; }
 .secondary:hover:not(:disabled) { background: var(--surface-subtle); color: var(--ink); border-color: var(--secondary-hover-border); }
 .start-button { width: 100%; min-height: 43px; margin-top: 16px; flex-shrink: 0; font-size: 13px; }

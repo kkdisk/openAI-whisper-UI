@@ -21,6 +21,9 @@ async function api(path, options={}) {
   if(!response.ok){let error;try{error=await response.json();}catch{error={message:"本機服務回應異常。"};}throw new Error(error.message);}
   return response.status===204?null:response.json();
 }
+const continuable = new Set(["cancelled", "failed", "interrupted"]);
+function canContinue(){ return !!selected&&continuable.has(selected.status)&&selected.segment_count>0&&!active&&!submitting&&!xhr&&!editor?.inserting&&!(selected.duration_sec&&selected.last_position_sec>=selected.duration_sec-0.5); }
+function runStart(meta){ return !terminal.has(meta.status)&&meta.continuations?.length?meta.continuations[meta.continuations.length-1].from_sec:0; }
 function canClearWorkspace(){ return !!selected&&terminal.has(selected.status)&&!active&&!submitting&&!xhr&&!editor?.dirty.size&&!editor?.saving&&!editor?.inserting; }
 function updateButtons(){
   $("start").disabled=!!active||submitting||!modelsReady;
@@ -29,7 +32,9 @@ function updateButtons(){
   const pending=state==="pause_requested"||state==="resume_requested";
   $("pauseResume").disabled=controlPending||!selected||selected.job_id!==active||selected.status!=="transcribing"||pending;
   $("pauseResume").textContent=state==="paused"?"繼續轉錄":state==="pause_requested"?"等待暫停…":state==="resume_requested"?"等待繼續…":"暫停轉錄";
-  $("pauseHint").textContent=!selected?"":selected.status==="transcribing"?state==="paused"?"模型與音訊仍占用記憶體，可繼續校稿。關閉服務後無法接續。":pending?(selected.control_wait_sec>=15?"仍在等待工作程序確認；可取消轉錄，已保存文字不受影響。":"正在等待工作程序確認，已產生的片段會先保存。"):"暫停會等待目前推論完成；不會立即中止原生運算。":"模型載入與解碼期間無法暫停；已結束的任務無法接續。";
+  $("pauseHint").textContent=!selected?"":selected.status==="transcribing"?state==="paused"?"模型與音訊仍占用記憶體，可繼續校稿。關閉服務後無法接續。":pending?(selected.control_wait_sec>=15?"仍在等待工作程序確認；可取消轉錄，已保存文字不受影響。":"正在等待工作程序確認，已產生的片段會先保存。"):"暫停會等待目前推論完成；不會立即中止原生運算。":continuable.has(selected.status)&&selected.segment_count?"可從已保存位置續跑：需重新選擇同一個原始檔，接縫附近請回聽確認。":"模型載入與解碼期間無法暫停。";
+  $("continueJob").disabled=!canContinue();
+  $("continueJob").hidden=!selected||!continuable.has(selected.status)||!selected.segment_count;
   $("clearWorkspace").disabled=!canClearWorkspace();
   const hint=active||submitting||xhr?"有活動任務，請待完成或取消後再清除。":!selected?"請先開啟一份已結束的紀錄。":!terminal.has(selected.status)?"此任務尚未結束，暫時無法清除。":"只清空顯示，歷史結果保留。";
   $("clearWorkspace").title=hint;$("clearWorkspaceHint").textContent=hint;
@@ -94,8 +99,9 @@ function showMeta(meta){
   else $("progress").removeAttribute("value");
   const activeElapsed=meta.active_elapsed_sec??meta.elapsed_sec;
   const running=!meta.execution_state||meta.execution_state==="running";
-  const eta=meta.status==="transcribing"&&running&&meta.last_position_sec>=60&&activeElapsed>=10&&meta.duration_sec?time(Math.max(0,activeElapsed*(meta.duration_sec/meta.last_position_sec-1))):running?"估算中":"暫停估算";
-  $("timing").textContent=`已保存位置 ${time(meta.last_position_sec)} / ${time(meta.duration_sec)} · 總耗時 ${time(meta.elapsed_sec)} · 活動 ${time(activeElapsed)} · 暫停 ${time(meta.paused_sec??0)} · 剩餘 ${terminal.has(meta.status)?"—":eta}（估計）`;
+  const done=meta.last_position_sec-runStart(meta);
+  const eta=meta.status==="transcribing"&&running&&done>=60&&activeElapsed>=10&&meta.duration_sec?time(Math.max(0,activeElapsed*(meta.duration_sec-meta.last_position_sec)/done)):running?"估算中":"暫停估算";
+  $("timing").textContent=`已保存位置 ${time(meta.last_position_sec)} / ${time(meta.duration_sec)} · ${runStart(meta)?"本次續跑":"總"}耗時 ${time(meta.elapsed_sec)} · 活動 ${time(activeElapsed)} · 暫停 ${time(meta.paused_sec??0)} · 剩餘 ${terminal.has(meta.status)?"—":eta}（估計）`;
   $("status").textContent+=` · 選擇 ${meta.request.device||"cpu"} · 實際 ${meta.actual_device||(meta.request.device&&meta.request.device!=="cpu"?"待確認":"cpu")} / ${meta.compute_type||"int8"}${meta.actual_device_index!=null?" · GPU "+meta.actual_device_index:""}${meta.fallback_reason?" · 已回退 CPU（"+meta.fallback_reason+"）":""}`;
   if(meta.error)message(meta.error);else if(meta.warnings.length)message(meta.warnings.join("\n"));
   document.querySelectorAll("[data-format]").forEach(b=>b.disabled=false);
@@ -283,7 +289,31 @@ $("form").onsubmit=async event=>{
     if(editor&&!await flushEdits())return;
     const meta=await api("/api/jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({source_name:file.name,expected_bytes:file.size,title:$("title").value,meeting_date:$("date").value,participants:$("participants").value,terms:$("terms").value,model:$("model").value,device:$("device").value||"auto",compute_type:$("computeType").value||"auto",device_index:Number($("deviceIndex").value||0),language:$("language").value,condition_on_previous_text:$("previousContext").checked,cpu_threads:Number($("threads").value),traditional:$("traditional").checked})});
     active=meta.job_id;await selectJob(meta.job_id);await history();
-    await new Promise((resolve,reject)=>{xhr=new XMLHttpRequest();xhr.open("PUT",`/api/jobs/${meta.job_id}/media`);xhr.setRequestHeader("Content-Type","application/octet-stream");xhr.setRequestHeader("X-CSRF-Token",csrf);xhr.upload.onprogress=e=>{if(selected?.job_id===meta.job_id&&e.lengthComputable){$("progress").value=e.loaded/e.total*100;$("timing").textContent=`上傳 ${Math.round(e.loaded/e.total*100)}%（與轉錄進度分開）`;}};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300)resolve();else{let text="上傳失敗";try{text=JSON.parse(xhr.responseText).message;}catch{}reject(new Error(text));}};xhr.onerror=()=>reject(new Error("上傳連線中斷。"));xhr.onabort=()=>reject(new Error("上傳已中止。"));xhr.send(file);});
+    await uploadMedia(meta.job_id,file);
+  }catch(error){message(error.message);}finally{submitting=false;xhr=null;try{await history();}catch{}updateButtons();}
+};
+function uploadMedia(id,file){
+  return new Promise((resolve,reject)=>{xhr=new XMLHttpRequest();xhr.open("PUT",`/api/jobs/${id}/media`);xhr.setRequestHeader("Content-Type","application/octet-stream");xhr.setRequestHeader("X-CSRF-Token",csrf);xhr.upload.onprogress=e=>{if(selected?.job_id===id&&e.lengthComputable){$("progress").value=e.loaded/e.total*100;$("timing").textContent=`上傳 ${Math.round(e.loaded/e.total*100)}%（與轉錄進度分開）`;}};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300)resolve();else{let text="上傳失敗";try{text=JSON.parse(xhr.responseText).message;}catch{}reject(new Error(text));}};xhr.onerror=()=>reject(new Error("上傳連線中斷。"));xhr.onabort=()=>reject(new Error("上傳已中止。"));xhr.send(file);});
+}
+$("continueJob").onclick=()=>{
+  if(!canContinue())return;
+  const pick=$("continueFile");pick.value="";pick.click();
+};
+$("continueFile").onchange=async()=>{
+  const file=$("continueFile").files[0];
+  if(!file||!canContinue())return;
+  const target=selected;message();
+  if(file.size!==target.request.expected_bytes){message(`檔案大小與原任務不同，請選擇原始檔「${target.request.source_name}」。`);return;}
+  const model=$("model").value||target.request.model,threads=Number($("threads").value)||target.request.cpu_threads;
+  if(!confirm(`將從 ${time(target.last_position_sec)} 續跑「${target.request.title||target.request.source_name}」。
+使用目前左側設定：模型 ${model}、${threads} 執行緒、裝置 ${$("device").value||"auto"}。
+接縫附近可能漏句或重複，完成後請回聽確認。`))return;
+  submitting=true;updateButtons();
+  try{
+    if(editor&&!await flushEdits())return;
+    const meta=await api(`/api/jobs/${target.job_id}/continue`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({expected_bytes:file.size,model,cpu_threads:threads,device:$("device").value||"auto",compute_type:$("computeType").value||"auto",device_index:Number($("deviceIndex").value||0)})});
+    active=meta.job_id;await selectJob(meta.job_id);await history();
+    await uploadMedia(meta.job_id,file);
   }catch(error){message(error.message);}finally{submitting=false;xhr=null;try{await history();}catch{}updateButtons();}
 };
 $("clearWorkspace").onclick=clearWorkspace;

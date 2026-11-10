@@ -59,7 +59,7 @@
     </section>
     <section class="workspace">
       <section class="panel transcript-panel">
-        <div class="sectionhead reader-heading"><div class="reader-title"><span class="eyebrow">逐字稿工作區</span><h2 id="jobTitle">逐字稿</h2></div><div class="workspace-controls"><div class="workspace-buttons"><button id="clearWorkspace" class="secondary" type="button" aria-describedby="clearWorkspaceHint" disabled>清除工作區</button><button id="pauseResume" class="secondary" type="button" aria-describedby="pauseHint" disabled>暫停轉錄</button><button id="cancel" class="secondary cancel-button" type="button" disabled>取消轉錄</button></div><span id="clearWorkspaceHint" class="hint clear-hint">只清空顯示，歷史結果保留。</span></div></div>
+        <div class="sectionhead reader-heading"><div class="reader-title"><span class="eyebrow">逐字稿工作區</span><h2 id="jobTitle">逐字稿</h2></div><div class="workspace-controls"><div class="workspace-buttons"><button id="clearWorkspace" class="secondary" type="button" aria-describedby="clearWorkspaceHint" disabled>清除工作區</button><button id="continueJob" class="secondary" type="button" aria-describedby="pauseHint" disabled hidden>從已保存位置續跑</button><input id="continueFile" type="file" accept=".mp4,.mp3,.wav,.m4a" hidden><button id="pauseResume" class="secondary" type="button" aria-describedby="pauseHint" disabled>暫停轉錄</button><button id="cancel" class="secondary cancel-button" type="button" disabled>取消轉錄</button></div><span id="clearWorkspaceHint" class="hint clear-hint">只清空顯示，歷史結果保留。</span></div></div>
         <div class="progress-area">
           <p id="status" role="status" aria-live="polite">選擇檔案，開始第一份會議逐字稿。</p>
           <progress id="progress" max="100" value="0"></progress>

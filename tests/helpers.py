@@ -131,3 +131,33 @@ def orphan_parent(marker, bind, paused=False):
     os.replace(temporary, marker_path)
     while True:
         time.sleep(0.1)
+
+
+def resumable_transcribe(path, request, settings, emit, cancelled, resume=None):
+    """首次產生 0～3 秒三段；續跑時自 from_sec 接續，並記錄收到的 resume。"""
+    import json
+
+    from app.schemas import AppError
+
+    if request.device != "cpu" and request.title == "cuda_first":
+        emit("device", {"actual_device": "cuda", "actual_device_index": 0, "compute_type": "f16"})
+        emit("status", {"status": "transcribing"})
+        raise AppError("cuda_oom", "模擬故障")
+    emit("device", {"actual_device": "cpu", "actual_device_index": None, "compute_type": "int8"})
+    emit("status", {"status": "transcribing"})
+    emit("info", {"duration_sec": 10, "versions": {}, "model_revision": "test"})
+    record = {"resume": resume, "model": request.model, "device": request.device}
+    with (settings.root / "runs.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    start, first = (resume["from_sec"], resume["first_segment_id"]) if resume else (0, 1)
+    for i in range(3):
+        emit(
+            "segment",
+            {
+                "segment_id": first + i,
+                "start_sec": start + i,
+                "end_sec": start + i + 1,
+                "raw_text": f"原文{first + i}",
+                "text": f"文字{first + i}",
+            },
+        )

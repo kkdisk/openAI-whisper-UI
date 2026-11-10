@@ -18,8 +18,11 @@ from app.formatter import CONVERSION
 from app.models import model_path
 from app.process_control import JobObject, stop_process, worker_entry
 from app.schemas import (
+    CONTINUABLE,
     TERMINAL,
     AppError,
+    Continuation,
+    ContinueRequest,
     ExecutionState,
     JobMeta,
     JobRequest,
@@ -46,6 +49,8 @@ class JobManager:
         self.segments: dict[str, list[TranscriptSegment]] = {}
         self.deadlines = {}
         self.receiving = set()
+        # 本次執行的 (request, resume)；續跑時與 meta.request 不同。
+        self.run_args = {}
         settings.jobs_dir.mkdir(parents=True, exist_ok=True)
         self.restore()
 
@@ -187,6 +192,82 @@ class JobManager:
             self.deadlines[meta.job_id] = time.monotonic() + self.settings.upload_wait_sec
             return meta.model_copy(deep=True)
 
+    def continue_job(self, job_id, body: ContinueRequest):
+        """H50a：從最後已保存片段的結束時間續跑；使用者須重新上傳同一原始檔。"""
+        with self.lock:
+            meta = self.metas.get(job_id)
+            if meta is None:
+                self.get(job_id)
+            if self.active:
+                raise AppError("busy", "已有活動任務，請完成或取消後再試。", 409)
+            if meta.status not in CONTINUABLE:
+                raise AppError("not_continuable", "只有已取消、中斷或失敗的任務可以續跑。", 409)
+            rows = self.segments[job_id]
+            if not rows:
+                raise AppError("not_continuable", "此任務尚無已保存片段，請直接建立新任務。", 409)
+            if meta.duration_sec is not None and meta.last_position_sec >= meta.duration_sec - 0.5:
+                raise AppError("not_continuable", "已保存位置已到音軌結尾，無需續跑。", 409)
+            if body.expected_bytes != meta.request.expected_bytes:
+                raise AppError("source_mismatch", "檔案大小與原任務不同，請選擇同一個原始檔。", 409)
+            overrides = body.model_dump(exclude={"expected_bytes"}, exclude_none=True)
+            request = meta.request.model_copy(update=overrides)
+            if self.check_model:
+                model_path(self.settings, request.model)
+            free = shutil.disk_usage(self.settings.jobs_dir).free
+            if free < request.expected_bytes + self.settings.disk_reserve_bytes:
+                raise AppError("disk_full", "磁碟空間不足。", 507)
+            previous = meta.model_copy(deep=True)
+            record = Continuation(
+                from_sec=meta.last_position_sec,
+                first_segment_id=len(rows) + 1,
+                model=request.model,
+                device=request.device,
+                cpu_threads=request.cpu_threads,
+                previous_status=meta.status.value,
+                prior_elapsed_sec=meta.elapsed_sec,
+                prior_active_elapsed_sec=meta.active_elapsed_sec,
+                prior_paused_sec=meta.paused_sec,
+                prior_actual_device=meta.actual_device,
+            )
+            meta.continuations.append(record)
+            meta.status = Status.UPLOADING
+            meta.error = meta.error_code = None
+            meta.uploaded_bytes = 0
+            meta.elapsed_sec = meta.active_elapsed_sec = meta.paused_sec = 0
+            meta.execution_state = ExecutionState.RUNNING
+            meta.control_wait_sec = 0
+            meta.actual_device = meta.actual_device_index = meta.fallback_reason = None
+            try:
+                self.save(meta)
+            except Exception:
+                self.metas[job_id] = previous
+                raise
+            resume = {
+                "from_sec": record.from_sec,
+                "first_segment_id": record.first_segment_id,
+                "context_text": " ".join(r.raw_text for r in rows[-40:])[-2000:],
+                "expected_duration_sec": meta.duration_sec,
+            }
+            self.run_args[job_id] = (request, resume)
+            self.active = job_id
+            self.deadlines[job_id] = time.monotonic() + self.settings.upload_wait_sec
+            return self.get(job_id)
+
+    def record_source(self, job_id, digest):
+        """首次上傳保存指紋；續跑時必須與既有指紋相同。"""
+        with self.lock:
+            meta = self.metas[job_id]
+            continuing = job_id in self.run_args and meta.continuations
+            if meta.source_sha256 is None:
+                meta.source_sha256 = digest
+                if continuing:
+                    meta.continuations[-1].source_check = "size_duration"
+            elif meta.source_sha256 != digest:
+                raise AppError("source_mismatch", "檔案內容與原任務不同，請選擇同一個原始檔。", 409)
+            elif continuing:
+                meta.continuations[-1].source_check = "sha256"
+            self.save(meta)
+
     def begin_upload(self, job_id):
         with self.lock:
             self.expire()
@@ -234,15 +315,17 @@ class JobManager:
                     if self.active == job_id:
                         self.active = None
                     self.deadlines.pop(job_id, None)
+                    self.run_args.pop(job_id, None)
 
     def start(self, job_id):
         with self.lock:
             if self.metas[job_id].status != Status.UPLOADING:
                 self.finish(job_id, Status.CANCELLED)
                 return
-            self.launch(job_id, self.metas[job_id].request)
+            request, resume = self.run_args.get(job_id, (self.metas[job_id].request, None))
+            self.launch(job_id, request, resume)
 
-    def launch(self, job_id, request):
+    def launch(self, job_id, request, resume=None):
         # 呼叫者持有 lock；回退只在舊工作程序已退出後建立乾淨程序。
         ctx = mp.get_context("spawn")
         receiver, sender = ctx.Pipe(duplex=False)
@@ -252,7 +335,16 @@ class JobManager:
         args = (self.directory(job_id) / "media.upload", request, self.settings)
         process = ctx.Process(
             target=worker_entry,
-            args=(gate, cancel, sender, self.target, args, pause, sequence),
+            args=(
+                gate,
+                cancel,
+                sender,
+                self.target,
+                args,
+                pause,
+                sequence,
+                {"resume": resume} if resume else None,
+            ),
         )
         job = None
         try:
@@ -302,11 +394,11 @@ class JobManager:
                     if kind == "error":
                         error, code = payload["message"], payload["code"]
                         retry = (
-                            meta.request.device == "auto"
+                            self.run_args.get(job_id, (meta.request, None))[0].device == "auto"
                             and meta.actual_device == "cuda"
                             and meta.fallback_reason is None
                             and code in CUDA_ERRORS
-                            and meta.segment_count == 0
+                            and meta.segment_count == self.run_start_count(job_id)
                             and meta.status != Status.CANCELLING
                         )
                         break
@@ -387,7 +479,11 @@ class JobManager:
                     meta.actual_device_index = None
                     try:
                         self.save(meta)
-                        self.launch(job_id, meta.request.model_copy(update={"device": "cpu"}))
+                        request, resume = self.run_args.get(job_id, (meta.request, None))
+                        request = request.model_copy(update={"device": "cpu"})
+                        if job_id in self.run_args:
+                            self.run_args[job_id] = (request, resume)
+                        self.launch(job_id, request, resume)
                     except Exception:
                         self.finish(
                             job_id,
@@ -397,6 +493,11 @@ class JobManager:
                         )
                 else:
                     self.finish(job_id, outcome, error, code)
+
+    def run_start_count(self, job_id):
+        """本次執行開始前已保存的片段數；首段前回退只看本次是否已有新片段。"""
+        resume = self.run_args.get(job_id, (None, None))[1]
+        return resume["first_segment_id"] - 1 if resume else 0
 
     def set_paused(self, job_id, paused):
         with self.lock:

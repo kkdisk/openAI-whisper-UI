@@ -446,3 +446,59 @@ test("pause restores on history load and is disabled outside transcription",asyn
   evaluate(`showMeta({...selected,control_seq:2,execution_state:"resume_requested",control_wait_sec:16});`);
   assert.match(elements.get("pauseHint").textContent,/仍在等待/);
 });
+
+test("continue is offered only for unfinished terminal jobs with saved segments",async()=>{
+  const {evaluate,elements}=setup();await seedEditor(evaluate,"cancelled");
+  const show=patch=>evaluate(`selected=null;active=null;showMeta({...meta,segment_count:3,...${JSON.stringify(patch)}});`);
+  show({});
+  assert.equal(elements.get("continueJob").hidden,false);
+  assert.equal(elements.get("continueJob").disabled,false);
+  assert.match(elements.get("pauseHint").textContent,/續跑/);
+  for(const patch of [{status:"completed"},{segment_count:0},{status:"transcribing"}]){
+    show(patch);assert.equal(elements.get("continueJob").disabled,true,JSON.stringify(patch));
+  }
+  show({last_position_sec:99.8});
+  assert.equal(elements.get("continueJob").disabled,true);
+  show({status:"interrupted"});
+  evaluate(`active="B";updateButtons();`);
+  assert.equal(elements.get("continueJob").disabled,true);
+});
+
+test("continue checks size, posts current settings and uploads to the same job",async()=>{
+  const {evaluate,elements,context}=setup();await seedEditor(evaluate,"cancelled");
+  evaluate(`selected=null;active=null;meta={...meta,segment_count:3,request:{title:"Meeting A",source_name:"a.m4a",expected_bytes:5,model:"small",cpu_threads:4}};showMeta(meta);
+    $("model").value="medium";$("threads").value="8";$("device").value="cpu";
+    var uploads=[];uploadMedia=async(id,file)=>{uploads.push([id,file.size]);};`);
+  let confirms=0;context.confirm=()=>{confirms++;return true;};
+  elements.get("continueFile").files=[{size:4}];
+  await elements.get("continueFile").onchange();
+  assert.match(elements.get("message").textContent,/大小與原任務不同/);
+  assert.equal(confirms,0);
+  assert.equal(evaluate("calls.some(c=>c.path.endsWith('/continue'))"),false);
+  evaluate(`const original=api;api=async(path,options)=>{if(path.endsWith("/continue")){calls.push({path,options});return {...meta,status:"uploading"};}return original(path,options);};`);
+  elements.get("continueFile").files=[{size:5}];
+  await elements.get("continueFile").onchange();
+  assert.equal(confirms,1);
+  const body=JSON.parse(evaluate("calls.find(c=>c.path.endsWith('/continue')).options.body"));
+  assert.deepEqual(body,{expected_bytes:5,model:"medium",cpu_threads:8,device:"cpu",compute_type:"auto",device_index:0});
+  assert.equal(evaluate("JSON.stringify(uploads)"),JSON.stringify([["A",5]]));
+  assert.equal(evaluate("submitting"),false);
+});
+
+test("declining the continue confirmation sends nothing",async()=>{
+  const {evaluate,elements,context}=setup();await seedEditor(evaluate,"failed");
+  evaluate(`selected=null;active=null;meta={...meta,segment_count:1,request:{title:"A",source_name:"a.m4a",expected_bytes:5}};showMeta(meta);`);
+  context.confirm=()=>false;
+  elements.get("continueFile").files=[{size:5}];
+  await elements.get("continueFile").onchange();
+  assert.equal(evaluate("calls.some(c=>c.path.endsWith('/continue'))"),false);
+  assert.equal(evaluate("submitting"),false);
+});
+
+test("remaining time after a continuation uses only this run's progress",()=>{
+  const {evaluate,elements}=setup();
+  evaluate(`showMeta({job_id:"A",status:"transcribing",execution_state:"running",request:{title:"A"},duration_sec:8000,last_position_sec:2200,active_elapsed_sec:600,elapsed_sec:600,warnings:[],continuations:[{from_sec:2000}]});`);
+  // 本次 600 秒處理 200 秒 → 剩 5800 秒需 17400 秒
+  assert.match(elements.get("timing").textContent,/剩餘 04:50:00/);
+  assert.match(elements.get("timing").textContent,/本次續跑耗時/);
+});

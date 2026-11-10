@@ -111,6 +111,25 @@ def iter_pcm(path: Path, max_duration_sec: int, cancelled=lambda: False) -> Iter
         raise AppError("empty_audio", "音軌沒有有效音訊。")
 
 
+def decode_from(
+    path: Path, max_duration_sec: int, start_sec: float, cancelled=lambda: False
+) -> tuple[np.ndarray, int]:
+    """解碼整檔但只保留 start_sec 之後的樣本；回傳（剩餘音訊, 全檔樣本數）。
+
+    起點之前的樣本只計數不保留，記憶體隨剩餘長度而非全長成長。
+    """
+    start = max(0, int(round(start_sec * SAMPLE_RATE)))
+    kept: list[np.ndarray] = []
+    total = 0
+    for array in iter_pcm(path, max_duration_sec, cancelled):
+        end = total + array.size
+        if end > start:
+            kept.append(array[max(0, start - total) :])
+        total = end
+    audio = np.concatenate(kept) if kept else np.zeros(0, dtype=np.float32)
+    return audio, total
+
+
 def _with_flush(frames):
     yield from frames
     yield None

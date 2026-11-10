@@ -113,7 +113,7 @@ class CooperativeControl:
         return False
 
 
-def worker_entry(gate, cancel, sender, target, arguments, pause=None, sequence=None):
+def worker_entry(gate, cancel, sender, target, arguments, pause=None, sequence=None, keywords=None):
     """綁定前不可載入引擎；父程序消失則退出。"""
     try:
         parent = mp.parent_process()
@@ -131,7 +131,7 @@ def worker_entry(gate, cancel, sender, target, arguments, pause=None, sequence=N
             if pause is not None
             else cancel.is_set
         )
-        target(*arguments, emit, control)
+        target(*arguments, emit, control, **(keywords or {}))
         sender.send(("done", {}))
     except Exception as exc:
         from app.schemas import AppError

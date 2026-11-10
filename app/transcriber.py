@@ -78,7 +78,10 @@ def controlled_segments(segments, cancelled):
         yield segment
 
 
-def transcribe(path: Path, request: JobRequest, settings: Settings, emit, cancelled):
+def transcribe(
+    path: Path, request: JobRequest, settings: Settings, emit, cancelled, resume: dict | None = None
+):
+    """resume 為 H50a 續跑資訊：from_sec、first_segment_id、context_text、expected_duration_sec。"""
     selection = select_device(request.device, request.compute_type, request.device_index)
     emit(
         "device",
@@ -90,7 +93,7 @@ def transcribe(path: Path, request: JobRequest, settings: Settings, emit, cancel
         },
     )
     try:
-        _transcribe(path, request, settings, emit, cancelled, selection)
+        _transcribe(path, request, settings, emit, cancelled, selection, resume)
     except Exception as exc:
         code = cuda_error(exc) if selection.device == "cuda" else None
         if code:
@@ -98,7 +101,7 @@ def transcribe(path: Path, request: JobRequest, settings: Settings, emit, cancel
         raise
 
 
-def _transcribe(path, request, settings, emit, cancelled, selection):
+def _transcribe(path, request, settings, emit, cancelled, selection, resume=None):
     offline_mode()
     emit("status", {"status": "loading_model"})
     from faster_whisper import WhisperModel
@@ -137,12 +140,31 @@ def _transcribe(path, request, settings, emit, cancelled, selection):
     if len(tokens) > settings.prompt_tokens:
         raise AppError("prompt_limit", "專有名詞提示過長，請縮短至完整提示 200 tokens 以內。")
     emit("status", {"status": "decoding"})
-    audio = decode_media(path, settings.max_duration_sec, cancelled)
+    offset_sec, first_id = 0.0, 1
+    if resume is None:
+        audio = decode_media(path, settings.max_duration_sec, cancelled)
+        total_samples = len(audio)
+    else:
+        from app.rolling import context_prompt, decode_from
+
+        offset_sec, first_id = float(resume["from_sec"]), int(resume["first_segment_id"])
+        audio, total_samples = decode_from(path, settings.max_duration_sec, offset_sec, cancelled)
+        expected = resume.get("expected_duration_sec")
+        if expected is not None and abs(total_samples / 16000 - expected) > 1.0:
+            raise AppError(
+                "source_mismatch", "選擇的檔案與原任務的音軌長度不同，請確認是同一個原始檔。"
+            )
+        if request.condition_on_previous_text and resume.get("context_text"):
+            options["initial_prompt"] = context_prompt(
+                prompt,
+                resume["context_text"],
+                lambda text: model.hf_tokenizer.encode(text, add_special_tokens=False).ids,
+            )
     manifest = json.loads((directory / "ready.json").read_text(encoding="utf-8"))
     emit(
         "info",
         {
-            "duration_sec": len(audio) / 16000,
+            "duration_sec": total_samples / 16000,
             "model_revision": manifest["revision"],
             "versions": {
                 name: version(name)
@@ -159,14 +181,16 @@ def _transcribe(path, request, settings, emit, cancelled, selection):
     if cancelled():
         return
     emit("status", {"status": "transcribing"})
+    if len(audio) == 0:
+        return  # 已保存位置即為音軌結尾，沒有剩餘音訊。
     segments, _ = model.transcribe(audio, **options)
-    for i, segment in enumerate(controlled_segments(segments, cancelled), 1):
+    for i, segment in enumerate(controlled_segments(segments, cancelled), first_id):
         if cancelled():
             return
         result = TranscriptSegment(
             segment_id=i,
-            start_sec=segment.start,
-            end_sec=segment.end,
+            start_sec=offset_sec + segment.start,
+            end_sec=offset_sec + segment.end,
             raw_text=segment.text.strip(),
             text=convert_text(segment.text.strip(), request.traditional),
         )

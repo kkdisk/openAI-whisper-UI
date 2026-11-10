@@ -24,3 +24,16 @@ def test_frontend_task_tracking():
         timeout=20,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_hidden_controls_stay_hidden():
+    """通用 input 樣式不可蓋過 hidden；續跑用的選檔欄位曾因此外露。"""
+    import re
+
+    root = Path(__file__).resolve().parents[1] / "app" / "static"
+    html = (root / "index.html").read_text(encoding="utf-8")
+    css = (root / "style.css").read_text(encoding="utf-8")
+    tags = {m.group(1) for m in re.finditer(r"<(\w+)[^>]*\shidden[\s>]", html)}
+    assert tags, "預期至少有一個 hidden 元素"
+    for tag in tags:
+        assert re.search(rf"{tag}\[hidden\][^{{]*\{{[^}}]*display:\s*none", css), tag

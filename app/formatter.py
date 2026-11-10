@@ -122,6 +122,16 @@ def export(meta: JobMeta, segments: list[TranscriptSegment], fmt: str, raw: bool
         f"語言：{meta.request.language}；轉換：{meta.conversion}\n"
         f"參考前文：{'開啟' if meta.request.condition_on_previous_text else '關閉'}\n"
     )
+    checks = {
+        "sha256": "已以指紋核對來源",
+        "size_duration": "僅核對大小與時長，未以指紋驗證",
+        "pending": "來源上傳未完成",
+    }
+    for n, c in enumerate(meta.continuations, 1):
+        info += (
+            f"續跑 {n}：自 {timestamp(c.from_sec)} 起（第 {c.first_segment_id} 段起），"
+            f"模型 {c.model}，{checks[c.source_check]}；接縫附近可能漏句或重複，請回聽確認\n"
+        )
     body = transcript_body(segments, raw)
     if fmt == "txt":
         return (info + "\n" + body + "\n").replace("\n", "\r\n")
