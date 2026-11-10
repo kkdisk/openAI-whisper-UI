@@ -6,8 +6,20 @@ import av
 import numpy as np
 import pytest
 
-from app.rolling import ENERGY_FRAME, SAMPLE_RATE, find_cut, iter_audio_blocks, iter_pcm
-from app.schemas import AppError
+from app.formatter import export
+from app.rolling import (
+    ENERGY_FRAME,
+    PROMPT_SAFETY_TOKENS,
+    PROMPT_TOKEN_LIMIT,
+    SAMPLE_RATE,
+    LanguageLock,
+    adjust_timestamps,
+    context_prompt,
+    find_cut,
+    iter_audio_blocks,
+    iter_pcm,
+)
+from app.schemas import AppError, JobMeta, JobRequest, TranscriptSegment
 from app.transcriber import decode_media
 
 SR = SAMPLE_RATE
@@ -257,3 +269,88 @@ def test_boundary_vad_finds_gaps_default_vad_merges(tmp_path):
     assert boundary.forced is False
     assert abs(boundary.index - (gap_start + gap_chunks / 2) * probs_per_chunk) < SR * 0.1
     assert default.forced is True
+
+
+# --- 每塊辨識規則 ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("rel", "next_offset", "expected", "adjusted"),
+    [
+        ((1, 2), 1200, (601, 602), False),
+        ((599, 603), 1200, (1199, 1200), True),  # 單端越界
+        ((601, 603), 1200, (1200, 1200), True),  # 雙端越界 → 零長度，start ≤ end
+        ((-0.5, 2), 1200, (600, 602), True),  # 早於本塊起點
+        ((601, 603), None, (1201, 1203), False),  # 最後一塊不裁切
+        ((5, 5), 1200, (605, 605), False),  # 原本零長度
+    ],
+)
+def test_adjust_timestamps(rel, next_offset, expected, adjusted):
+    start, end, changed = adjust_timestamps(*rel, offset_sec=600, next_offset_sec=next_offset)
+    assert (start, end) == expected and changed is adjusted
+    assert start <= end
+
+
+def test_adjust_timestamps_non_finite_kept():
+    start, end, changed = adjust_timestamps(1, float("nan"), 600, 1200)
+    assert start == 601 and np.isnan(end) and changed is True
+
+
+def test_adjusted_segments_still_export_srt():
+    rows = [
+        adjust_timestamps(599, 603, 600, 1200),
+        adjust_timestamps(601, 603, 600, 1200),
+        adjust_timestamps(0, 1, 1200, None),
+    ]
+    segments = [
+        TranscriptSegment(segment_id=i, start_sec=s, end_sec=e, raw_text="字", text="字")
+        for i, (s, e, _) in enumerate(rows, 1)
+    ]
+    meta = JobMeta(job_id="j", request=JobRequest(source_name="a.wav", expected_bytes=1))
+    assert export(meta, segments, "srt").count("-->") == 3
+
+
+def fake_encode(text):
+    return [ord(c) for c in text]
+
+
+def test_context_prompt_keeps_terms_and_trims_tail():
+    base = "引導句 術語"
+    tokens = context_prompt(base, "x" * 1000, fake_encode)
+    base_tokens = fake_encode(" " + base)
+    assert tokens[: len(base_tokens)] == base_tokens
+    assert len(tokens) == PROMPT_TOKEN_LIMIT - PROMPT_SAFETY_TOKENS
+    assert tokens[-1] == ord("x")
+
+
+def test_context_prompt_limits():
+    assert context_prompt("ab", "", fake_encode) == fake_encode(" ab")
+    assert context_prompt("ab", "末尾文字", fake_encode, max_tail_tokens=2) == [
+        *fake_encode(" ab"),
+        *fake_encode("文字"),
+    ]
+    huge = "y" * PROMPT_TOKEN_LIMIT
+    assert context_prompt(huge, "末尾", fake_encode) == fake_encode(" " + huge)
+
+
+@pytest.mark.parametrize("fixed", ["zh", "en"])
+def test_language_fixed(fixed):
+    lock = LanguageLock(fixed)
+    lock.observe("ja", 100)
+    assert lock.language == fixed
+
+
+def test_language_auto_waits_for_speech():
+    lock = LanguageLock("auto")
+    lock.observe("en", 0.0)  # 首塊全靜音
+    lock.observe("ja", 1.2)  # 短促雜音
+    assert lock.language is None
+    lock.observe("zh", 30)
+    lock.observe("en", 300)
+    assert lock.language == "zh"
+
+
+def test_language_mixed_never_locks():
+    lock = LanguageLock("mixed")
+    lock.observe("zh", 300)
+    assert lock.language is None

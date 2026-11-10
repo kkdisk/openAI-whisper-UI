@@ -261,7 +261,7 @@ TXT 與 MD 的標頭比照前文設定，記錄分段模式與區塊長度。
 | 編號 | 工作 | 驗收 |
 |---|---|---|
 | T100.1 | 實作 `iter_audio_blocks` 與邊界選擇，加單元測試（測試項目見下方） | 測試通過。2026-11-10 已完成於 app/rolling.py、tests/test_rolling.py（27 項）；完整 pytest 142 passed、5 skipped。未接入正式流程，也未以真實語音驗證切點品質（留待 T100.3） |
-| T100.2 | 新增 scripts/benchmark_rolling.py，對同一檔案依序跑整段與各種 block_sec 的分段（產出項目見下方） | 產出完整、不覆蓋既有資料 |
+| T100.2 | 新增 scripts/benchmark_rolling.py，對同一檔案依序跑整段與各種 block_sec 的分段（產出項目見下方） | 產出完整、不覆蓋既有資料。2026-11-10 已完成程式與替身測試；每塊規則（時間戳越界、auto 語言鎖定、前文 token 預算）放在 app/rolling.py 供 R2 沿用；完整 pytest 166 passed、5 skipped。尚未以真實模型執行，留待 UI 轉錄結束後做煙霧測試 |
 | T100.3 | 以 5 分鐘中英混合樣本、R01（108 分）、2:24 檔，比較 block_sec 300／600／1200 秒；整段路徑以相同 seed 跑兩次，量測基準雜訊 | 數據與人工回聽紀錄寫入 validation.md |
 | T100.3m | 記憶體脫鉤實驗（方法見下方） | 依第 6 節的記憶體標準判定 |
 | 閘門 | 使用者檢視比較結果，定案 block_sec、prev_context_tokens、是否需要重疊 | 使用者確認後才進入 R2 |

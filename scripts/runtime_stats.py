@@ -8,6 +8,24 @@ import time
 
 
 def peak_ram_bytes():
+    counters = memory_counters()
+    return counters.PeakWorkingSetSize if counters else None
+
+
+def memory_snapshot():
+    """工作集可能在系統記憶體吃緊時被縮減；private commit 不受縮減影響。"""
+    counters = memory_counters()
+    if counters is None:
+        return None
+    return {
+        "working_set_bytes": counters.WorkingSetSize,
+        "peak_working_set_bytes": counters.PeakWorkingSetSize,
+        "private_bytes": counters.PagefileUsage,
+        "peak_private_bytes": counters.PeakPagefileUsage,
+    }
+
+
+def memory_counters():
     if os.name != "nt":
         return None
     from ctypes import wintypes
@@ -34,7 +52,7 @@ def peak_ram_bytes():
     query = ctypes.windll.psapi.GetProcessMemoryInfo
     query.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
     if query(current(), ctypes.byref(counters), counters.cb):
-        return counters.PeakWorkingSetSize
+        return counters
     return None
 
 

@@ -146,3 +146,74 @@ def iter_audio_blocks(
             pending, buffered = [buffer[split:]], buffer.size - split
     if buffered:
         yield AudioBlock(offset, np.concatenate(pending), False)
+
+
+# --- 每塊辨識的規則（計畫書 3.4）；純函式，R2 整合時沿用 --------------------
+
+# faster-whisper get_prompt 只保留前文最後 max_length // 2 - 1 = 223 個 token。
+PROMPT_TOKEN_LIMIT = 223
+PROMPT_SAFETY_TOKENS = 8
+LANGUAGE_LOCK_MIN_SPEECH_SEC = 2.0
+
+
+def adjust_timestamps(
+    start_rel: float, end_rel: float, offset_sec: float, next_offset_sec: float | None
+) -> tuple[float, float, bool]:
+    """塊內時間換算為原檔時間；只在越過本塊範圍時調整，不刪文字。
+
+    next_offset_sec 為下一塊起點；最後一塊傳 None，與整段路徑相同不裁切結尾。
+    非有限值原樣換算（與整段路徑相同），回傳 adjusted=True 以便記錄。
+    """
+    start, end = offset_sec + start_rel, offset_sec + end_rel
+    if not (np.isfinite(start) and np.isfinite(end)):
+        return start, end, True
+    adjusted = False
+    if start < offset_sec:
+        start, adjusted = offset_sec, True
+    if end < offset_sec:
+        end, adjusted = offset_sec, True
+    if next_offset_sec is not None:
+        if end > next_offset_sec:
+            end, adjusted = next_offset_sec, True
+        if start > next_offset_sec:
+            start, adjusted = next_offset_sec, True
+    return start, end, adjusted
+
+
+def context_prompt(
+    base_prompt: str,
+    previous_text: str,
+    encode: Callable[[str], list[int]],
+    max_tail_tokens: int | None = None,
+) -> list[int]:
+    """引導句＋術語在前、上一塊尾端原文在後；總長不超過 get_prompt 保留上限。
+
+    超過上限時 get_prompt 會從開頭截斷，術語會先被丟掉，因此只縮短尾端原文。
+    """
+    base = encode(" " + base_prompt.strip()) if base_prompt.strip() else []
+    budget = PROMPT_TOKEN_LIMIT - PROMPT_SAFETY_TOKENS - len(base)
+    if max_tail_tokens is not None:
+        budget = min(budget, max_tail_tokens)
+    if budget <= 0 or not previous_text.strip():
+        return base
+    tail = encode(" " + previous_text.strip())
+    return base + tail[-budget:]
+
+
+class LanguageLock:
+    """auto 在第一個有效語音量達門檻的區塊才鎖定；zh／en 固定，mixed 逐窗偵測。"""
+
+    def __init__(self, language: str, min_speech_sec: float = LANGUAGE_LOCK_MIN_SPEECH_SEC):
+        self.mode = language
+        self.min_speech_sec = min_speech_sec
+        self.locked: str | None = language if language in {"zh", "en"} else None
+
+    @property
+    def language(self) -> str | None:
+        """傳給本塊 model.transcribe 的 language。"""
+        return self.locked
+
+    def observe(self, detected: str, duration_after_vad: float) -> None:
+        if self.mode == "auto" and self.locked is None:
+            if duration_after_vad >= self.min_speech_sec:
+                self.locked = detected
