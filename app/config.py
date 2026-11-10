@@ -21,7 +21,7 @@ class Settings:
     root: Path = ROOT
     max_upload_bytes: int = 4 * 1024**3
     disk_reserve_bytes: int = 1024**3
-    max_duration_sec: int = 120 * 60
+    max_duration_sec: int = 180 * 60
     max_json_bytes: int = 64 * 1024
     upload_wait_sec: float = 60
     upload_idle_sec: float = 60
