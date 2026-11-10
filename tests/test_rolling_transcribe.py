@@ -14,7 +14,7 @@ from app.jobs import JobManager
 from app.main import create_app
 from app.schemas import AppError, JobMeta, JobRequest, Status
 from app.transcriber import transcribe
-from tests.helpers import rolling_events_transcribe, wait_terminal
+from tests.helpers import interrupted_block_transcribe, rolling_events_transcribe, wait_terminal
 
 SR = 16000
 
@@ -124,7 +124,7 @@ def test_rolling_blocks_offsets_ids_and_prompts(tmp_path, engine):
     assert blocks[0]["locked_language"] == "zh" and blocks[1]["locked_language"] is None
     assert isinstance(calls[0]["initial_prompt"], str)
     prompt = "".join(map(chr, calls[1]["initial_prompt"]))
-    assert "GLT-123" in prompt and prompt.endswith("越界")
+    assert "GLT-123" in prompt and prompt.endswith("第0塊15秒")  # 越界片段不帶入提示
     info = of(events, "info")
     assert info[0]["duration_sec"] == pytest.approx(50) and info[-1]["duration_sec"] == 50
 
@@ -238,6 +238,18 @@ def test_manager_records_rolling_metadata(tmp_path):
     assert "分段辨識：rolling，區塊約 600 秒，切點 2 個" in header
     restored = JobManager(settings, rolling_events_transcribe, False)
     assert restored.get(meta.job_id).boundaries_sec == [598.5, 1201.0]
+
+
+def test_cut_recorded_when_cancelled_mid_next_block(tmp_path):
+    settings = Settings(root=tmp_path, disk_reserve_bytes=0, segmentation="rolling")
+    manager = JobManager(settings, interrupted_block_transcribe, False)
+    meta = manager.create(JobRequest(source_name="a.m4a", expected_bytes=3))
+    manager.begin_upload(meta.job_id).write_bytes(b"abc")
+    manager.end_upload(meta.job_id)
+    manager.start(meta.job_id)
+    done = wait_terminal(manager, meta.job_id)
+    # 續跑首塊（起點為接縫）完成後即中斷：其結尾切點仍需記錄，接縫本身不記。
+    assert done.boundaries_sec == [2888.52 + 583.5]
 
 
 def test_legacy_metadata_reads_as_whole():

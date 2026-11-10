@@ -155,6 +155,7 @@ def rolling_events_transcribe(path, request, settings, emit, cancelled, resume=N
                 "offset_sec": offset,
                 "duration_sec": 598.5 if index == 0 else 602.5,
                 "forced_cut": index == 1,
+                "last": index == 2,
                 "locked_language": "zh" if index == 0 else None,
             },
         )
@@ -196,3 +197,20 @@ def sigint_probe(emit, cancelled):
     import signal
 
     emit("probe", {"ignored": signal.getsignal(signal.SIGINT) == signal.SIG_IGN})
+
+
+def interrupted_block_transcribe(path, request, settings, emit, cancelled, resume=None):
+    """續跑首塊完成、第二塊未完成即結束。"""
+    emit("status", {"status": "transcribing"})
+    emit("info", {"duration_sec": 8668.0, "versions": {}, "model_revision": "test"})
+    emit(
+        "block",
+        {
+            "index": 0,
+            "offset_sec": 2888.52,
+            "duration_sec": 583.5,
+            "forced_cut": False,
+            "last": False,
+            "locked_language": None,
+        },
+    )

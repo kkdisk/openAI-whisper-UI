@@ -284,7 +284,8 @@ def _transcribe_rolling(model, directory, path, request, settings, emit, cancell
                 "segment",
                 segment_payload(next_id, start, end, segment.text, request, outside),
             )
-            texts.append(segment.text.strip())
+            if not outside:
+                texts.append(segment.text.strip())  # 塊尾生成文字不帶入下一塊提示
             next_id += 1
         if cancelled():
             return
@@ -299,6 +300,7 @@ def _transcribe_rolling(model, directory, path, request, settings, emit, cancell
                 "offset_sec": block.offset_sec,
                 "duration_sec": len(block.audio) / 16000,
                 "forced_cut": block.forced_cut,
+                "last": last,
                 "locked_language": lock.language if lock.language != was_locked else None,
             },
         )

@@ -430,11 +430,16 @@ class JobManager:
                         self.save(meta)
                     elif kind == "block":
                         offset = float(payload["offset_sec"])
-                        # 首塊起點是檔頭或續跑接縫，不是切點。
-                        if payload["index"] > 0 and offset not in meta.boundaries_sec:
-                            meta.boundaries_sec.append(offset)
+                        end = round(offset + float(payload["duration_sec"]), 3)
+                        # 記錄已完成區塊的結尾切點：中途取消時，未完成的下一塊不會漏記切點。
+                        # 首塊起點是檔頭或續跑接縫，不是切點；舊事件沒有 last，退回記錄起點。
+                        cuts = [round(offset, 3)] if payload["index"] > 0 else []
+                        if payload.get("last") is False:
+                            cuts.append(end)
+                        for cut in cuts:
+                            if cut not in meta.boundaries_sec:
+                                meta.boundaries_sec.append(cut)
                         if payload.get("forced_cut"):
-                            end = offset + float(payload["duration_sec"])
                             meta.warnings.append(f"boundary_forced@{end:.1f}")
                         if payload.get("locked_language"):
                             meta.detected_language = payload["locked_language"]
