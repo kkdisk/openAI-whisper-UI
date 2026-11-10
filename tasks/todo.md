@@ -195,3 +195,20 @@ T70.1 進度：small／medium／large-v3-turbo 已按交接 revision 完成權�
 - [ ] H40 局部重辨識：先驗證資源與時間對齊，再做候選差異、採用／撤銷及術語表；不覆寫人工稿。
 - [ ] H50 斷點續跑：先驗證區塊／上下文策略，再做 checkpoint、來源政策及中斷恢復；不以最後輸出時間當恢復點。
 - [ ] H.G 短檔功能矩陣、瀏覽器操作與真實長檔校稿接受分別有證據；未通過不得宣稱完整人工輔助流程已完成。
+
+## M10：長音檔分段辨識與續跑（T100／H50a，v0.6.0）
+
+詳見 [rolling-transcription.md](rolling-transcription.md) 及 [human-assisted-transcription.md](human-assisted-transcription.md) 第 8 節。
+
+- [x] T100.0a 時長上限 120 → 180 分鐘（整段模式）。
+- [ ] T100.0b 2:24 實錄整段路徑完整量測：只取得部分數據（峰值 8,937 MB，31:52 時取消），見 validation.md。
+- [x] T100.1 串流切塊與切點選擇（app/rolling.py）。
+- [x] T100.2 整段／分段對照腳本（scripts/benchmark_rolling.py）；已以真實模型跑通整段組。
+- [ ] T100.3 短素材比較：5 分鐘樣本，block 60／120／300 秒；含英文漏句、參考前文與 mixed 語言設定。
+- [ ] T100.3m 記憶體 1×／2×／4× 實驗。
+- [x] T100.4～T100.6 rolling 接入正式流程與測試；真實模型 70 秒煙霧測試通過。tests/test_pause.py 以 rolling 模式重跑的真實子程序測試尚未完成。
+- [x] 預設改為 rolling（使用者要求，早於 R3 驗收）。
+- [ ] T100.7 R3 長檔驗收：2:24 實錄 rolling 已取得部分數據（峰值 1,924 MB、切點 58:07），尚未跑完全程；R01 未測。
+- [ ] T100.9 前端 3 萬段渲染量測。
+- [x] H50a 從已保存位置續跑；使用者已在 2:24 實錄上實際續跑四次。接縫回聽待使用者確認。
+- [x] 關閉服務時 SSE／工作程序 traceback 修正。
