@@ -3,6 +3,7 @@
 import ctypes
 import multiprocessing as mp
 import os
+import signal
 import time
 from ctypes import wintypes
 
@@ -116,6 +117,8 @@ class CooperativeControl:
 def worker_entry(gate, cancel, sender, target, arguments, pause=None, sequence=None, keywords=None):
     """綁定前不可載入引擎；父程序消失則退出。"""
     try:
+        # 主控台 Ctrl+C 會送到整個程序群組；工作程序改由主程序取消流程收尾。
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         parent = mp.parent_process()
         while not gate.wait(0.1):
             if parent is None or not parent.is_alive():

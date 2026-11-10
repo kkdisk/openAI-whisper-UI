@@ -125,6 +125,11 @@ def create_app(settings: Settings | None = None, manager: JobManager | None = No
         await asyncio.to_thread(manager.close)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+    def shutting_down():
+        server = getattr(app.state, "server", None)
+        return bool(server is not None and server.should_exit)
+
     app.state.manager = manager
     app.add_middleware(LocalAccess, session=session, csrf=csrf, port=settings.port)
 
@@ -365,7 +370,8 @@ def create_app(settings: Settings | None = None, manager: JobManager | None = No
                 )
                 return f"id: {sequence}\nevent: {kind}\ndata: {payload}\n\n"
 
-            while not await request.is_disconnected():
+            # 服務關閉時主動結束串流，避免 uvicorn 等到逾時再強制取消並記錄錯誤。
+            while not await request.is_disconnected() and not shutting_down():
                 with manager.lock:
                     meta = manager.get(job_id)
                     rows = list(manager.segments[job_id][after : after + 200])
@@ -416,7 +422,7 @@ def main():
         sock.close()
         raise SystemExit("8000 埠已被占用，請關閉衝突服務後再啟動。") from None
     app = create_app(settings)
-    server = uvicorn.Server(
+    server = app.state.server = uvicorn.Server(
         uvicorn.Config(
             app,
             host="127.0.0.1",

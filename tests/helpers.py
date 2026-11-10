@@ -190,3 +190,9 @@ def resumable_transcribe(path, request, settings, emit, cancelled, resume=None):
                 "text": f"文字{first + i}",
             },
         )
+
+
+def sigint_probe(emit, cancelled):
+    import signal
+
+    emit("probe", {"ignored": signal.getsignal(signal.SIGINT) == signal.SIG_IGN})
