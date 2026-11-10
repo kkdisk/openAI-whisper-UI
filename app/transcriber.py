@@ -140,6 +140,9 @@ def _transcribe(path, request, settings, emit, cancelled, selection, resume=None
     if len(tokens) > settings.prompt_tokens:
         raise AppError("prompt_limit", "專有名詞提示過長，請縮短至完整提示 200 tokens 以內。")
     emit("status", {"status": "decoding"})
+    if settings.segmentation == "rolling":
+        _transcribe_rolling(model, directory, path, request, settings, emit, cancelled, resume)
+        return
     offset_sec, first_id = 0.0, 1
     if resume is None:
         audio = decode_media(path, settings.max_duration_sec, cancelled)
@@ -151,33 +154,12 @@ def _transcribe(path, request, settings, emit, cancelled, selection, resume=None
         audio, total_samples = decode_from(path, settings.max_duration_sec, offset_sec, cancelled)
         expected = resume.get("expected_duration_sec")
         if expected is not None and abs(total_samples / 16000 - expected) > 1.0:
-            raise AppError(
-                "source_mismatch", "選擇的檔案與原任務的音軌長度不同，請確認是同一個原始檔。"
-            )
+            raise AppError("source_mismatch", SOURCE_MISMATCH)
         if request.condition_on_previous_text and resume.get("context_text"):
             options["initial_prompt"] = context_prompt(
-                prompt,
-                resume["context_text"],
-                lambda text: model.hf_tokenizer.encode(text, add_special_tokens=False).ids,
+                prompt, resume["context_text"], token_encoder(model)
             )
-    manifest = json.loads((directory / "ready.json").read_text(encoding="utf-8"))
-    emit(
-        "info",
-        {
-            "duration_sec": total_samples / 16000,
-            "model_revision": manifest["revision"],
-            "versions": {
-                name: version(name)
-                for name in (
-                    "faster-whisper",
-                    "ctranslate2",
-                    "av",
-                    "onnxruntime",
-                    "opencc-python-reimplemented",
-                )
-            },
-        },
-    )
+    emit("info", run_info(directory, total_samples / 16000))
     if cancelled():
         return
     emit("status", {"status": "transcribing"})
@@ -187,11 +169,134 @@ def _transcribe(path, request, settings, emit, cancelled, selection, resume=None
     for i, segment in enumerate(controlled_segments(segments, cancelled), first_id):
         if cancelled():
             return
-        result = TranscriptSegment(
-            segment_id=i,
-            start_sec=offset_sec + segment.start,
-            end_sec=offset_sec + segment.end,
-            raw_text=segment.text.strip(),
-            text=convert_text(segment.text.strip(), request.traditional),
+        emit(
+            "segment",
+            segment_payload(
+                i, offset_sec + segment.start, offset_sec + segment.end, segment.text, request
+            ),
         )
-        emit("segment", result.model_dump())
+
+
+SOURCE_MISMATCH = "選擇的檔案與原任務的音軌長度不同，請確認是同一個原始檔。"
+
+
+def token_encoder(model):
+    return lambda text: model.hf_tokenizer.encode(text, add_special_tokens=False).ids
+
+
+def run_info(directory, duration_sec):
+    manifest = json.loads((directory / "ready.json").read_text(encoding="utf-8"))
+    return {
+        "duration_sec": duration_sec,
+        "model_revision": manifest["revision"],
+        "versions": {
+            name: version(name)
+            for name in (
+                "faster-whisper",
+                "ctranslate2",
+                "av",
+                "onnxruntime",
+                "opencc-python-reimplemented",
+            )
+        },
+    }
+
+
+def segment_payload(segment_id, start, end, text, request):
+    return TranscriptSegment(
+        segment_id=segment_id,
+        start_sec=start,
+        end_sec=end,
+        raw_text=text.strip(),
+        text=convert_text(text.strip(), request.traditional),
+    ).model_dump()
+
+
+def _transcribe_rolling(model, directory, path, request, settings, emit, cancelled, resume):
+    """R2 分段辨識：逐塊推論，峰值記憶體由區塊長度而非總長決定。"""
+    from app.rolling import (
+        LanguageLock,
+        adjust_timestamps,
+        context_prompt,
+        declared_duration,
+        iter_audio_blocks,
+        with_last,
+    )
+
+    options = transcription_options(request)
+    base_prompt = options["initial_prompt"]
+    encode = token_encoder(model)
+    start_sec = float(resume["from_sec"]) if resume else 0.0
+    next_id = int(resume["first_segment_id"]) if resume else 1
+    expected = resume.get("expected_duration_sec") if resume else None
+    declared = declared_duration(path)
+    if declared is not None and declared > settings.effective_max_duration_sec:
+        raise AppError("duration_limit", "音軌超過允許的時長。")
+    if expected is not None and declared is not None and abs(declared - expected) > 1.0:
+        raise AppError("source_mismatch", SOURCE_MISMATCH)
+    emit("info", run_info(directory, declared))
+    lock = LanguageLock(request.language, settings.language_lock_min_speech_sec)
+    previous_text = (resume.get("context_text") or "") if resume else ""
+    stats = {}
+    blocks = iter_audio_blocks(
+        path,
+        settings.block_sec,
+        settings.boundary_search_sec,
+        settings.effective_max_duration_sec,
+        cancelled,
+        min_gap_sec=settings.min_gap_sec,
+        start_sec=start_sec,
+        stats=stats,
+    )
+    checkpoint = getattr(cancelled, "checkpoint", None)
+    started = False
+    for index, (block, last) in enumerate(with_last(blocks)):
+        if cancelled():
+            return
+        if not started:
+            emit("status", {"status": "transcribing"})
+            started = True
+        elif checkpoint is not None and not checkpoint():
+            return  # 區塊之間是乾淨的暫停點；checkpoint 回 False 代表取消。
+        opts = {**options, "language": lock.language}
+        if request.condition_on_previous_text and previous_text:
+            opts["initial_prompt"] = context_prompt(
+                base_prompt, previous_text, encode, settings.prev_context_tokens
+            )
+        next_offset = None if last else block.offset_sec + len(block.audio) / 16000
+        segments, info = model.transcribe(block.audio, **opts)
+        texts = []
+        for segment in controlled_segments(segments, cancelled):
+            if cancelled():
+                return
+            start, end, adjusted = adjust_timestamps(
+                segment.start, segment.end, block.offset_sec, next_offset
+            )
+            if adjusted:
+                emit(
+                    "warning",
+                    {"code": f"timestamp_adjusted@{next_id}:{segment.start:.2f}-{segment.end:.2f}"},
+                )
+            emit("segment", segment_payload(next_id, start, end, segment.text, request))
+            texts.append(segment.text.strip())
+            next_id += 1
+        if cancelled():
+            return
+        was_locked = lock.language
+        lock.observe(info.language, info.duration_after_vad)
+        if texts:
+            previous_text = " ".join(texts)[-2000:]
+        emit(
+            "block",
+            {
+                "index": index,
+                "offset_sec": block.offset_sec,
+                "duration_sec": len(block.audio) / 16000,
+                "forced_cut": block.forced_cut,
+                "locked_language": lock.language if lock.language != was_locked else None,
+            },
+        )
+    actual = stats.get("total_samples", 0) / 16000
+    if expected is not None and abs(actual - expected) > 1.0:
+        emit("warning", {"code": f"source_duration_mismatch:{actual:.1f}/{expected:.1f}"})
+    emit("info", run_info(directory, actual))

@@ -6,6 +6,14 @@
 
 > 2026-11-10 修訂：依外部 review 補齊五項規格缺口，包括邊界 VAD 參數、auto 語言鎖定時機、時間戳越界規則、GPU 回退條件、RAM 驗收方法，分別見第 3.3、3.4、3.5、5、6 節。review 所述的引用處都已對照程式碼確認。review 回報完整 pytest 為 115 passed、5 skipped，Ruff、格式檢查與 `git diff --check` 通過；尚未執行真實模型、GPU 或長檔量測。
 
+> 2026-11-10 加速調整（使用者要求）：
+> - **R2 提前實作**：rolling 放在 `WHISPER_SEGMENTATION=rolling` 開關之後，預設仍為整段，不影響現有使用。R1 改為只用來調整預設參數，不再是 R2 的前置閘門；預設切換的閘門移到 R3。
+> - **R1 改用短素材**：
+>   - 切點與品質比較：5 分鐘樣本，搭配 60／120／300 秒區塊。
+>   - 記憶體實驗：10 分鐘片段的 1×／2×／4×。
+> - **2:24 與 R01 的完整驗收移到 R3**：改用晚上掛著跑或 GPU 電腦跑。
+> - **H50a 已先交付**：從已保存位置續跑，見 human-assisted-transcription.md 第 8 節。
+
 ## 1. 背景與目標
 
 使用者一份 2:24:28 的錄音超過 120 分鐘上限，被 `duration_limit` 拒絕。工作區已將上限調為 180 分鐘，修改了以下四處：
@@ -262,9 +270,9 @@ TXT 與 MD 的標頭比照前文設定，記錄分段模式與區塊長度。
 |---|---|---|
 | T100.1 | 實作 `iter_audio_blocks` 與邊界選擇，加單元測試（測試項目見下方） | 測試通過。2026-11-10 已完成於 app/rolling.py、tests/test_rolling.py（27 項）；完整 pytest 142 passed、5 skipped。未接入正式流程，也未以真實語音驗證切點品質（留待 T100.3） |
 | T100.2 | 新增 scripts/benchmark_rolling.py，對同一檔案依序跑整段與各種 block_sec 的分段（產出項目見下方） | 產出完整、不覆蓋既有資料。2026-11-10 已完成程式與替身測試；每塊規則（時間戳越界、auto 語言鎖定、前文 token 預算）放在 app/rolling.py 供 R2 沿用；完整 pytest 166 passed、5 skipped。尚未以真實模型執行，留待 UI 轉錄結束後做煙霧測試 |
-| T100.3 | 以 5 分鐘中英混合樣本、R01（108 分）、2:24 檔，比較 block_sec 300／600／1200 秒；整段路徑以相同 seed 跑兩次，量測基準雜訊 | 數據與人工回聽紀錄寫入 validation.md |
+| T100.3 | 以 5 分鐘中英混合樣本比較 block_sec 60／120／300 秒；整段路徑以相同 seed 跑兩次，量測基準雜訊。R01 與 2:24 檔改在 R3 驗收 | 數據與人工回聽紀錄寫入 validation.md |
 | T100.3m | 記憶體脫鉤實驗（方法見下方） | 依第 6 節的記憶體標準判定 |
-| 閘門 | 使用者檢視比較結果，定案 block_sec、prev_context_tokens、是否需要重疊 | 使用者確認後才進入 R2 |
+| 參數定案 | 使用者檢視比較結果，定案 block_sec、prev_context_tokens、是否需要重疊 | 結果只更新 Settings 的預設值，不阻擋 R2 |
 
 T100.1 的單元測試涵蓋：
 
@@ -298,9 +306,9 @@ T100.3m 的方法：
 
 | 編號 | 工作 | 驗收 |
 |---|---|---|
-| T100.4 | 依第 3.4～3.5 節修改 transcriber.py `_transcribe`；整段模式維持原程式路徑 | 整段模式行為與輸出不變 |
-| T100.5 | 新增 JobMeta 欄位、formatter 標頭、info 事件更新、上限依模式檢查；benchmark 腳本新增 `--segmentation` | 舊任務可讀，匯出內容正確 |
-| T100.6 | 補測試（測試項目見下方） | pytest 與 Node 前端測試通過；ruff 通過 |
+| T100.4 | 依第 3.4～3.5 節修改 transcriber.py `_transcribe`；整段模式維持原程式路徑 | 整段模式行為與輸出不變。2026-11-10 已完成 `_transcribe_rolling`，含 H50a 續跑起點 |
+| T100.5 | 新增 JobMeta 欄位、formatter 標頭、info 事件更新、上限依模式檢查；benchmark 腳本新增 `--segmentation` | 舊任務可讀，匯出內容正確。2026-11-10 已完成；`--segmentation` 由 benchmark_rolling.py 的 `--runs` 取代，兩支舊腳本不改 |
+| T100.6 | 補測試（測試項目見下方） | pytest 與 Node 前端測試通過；ruff 通過。2026-11-10 新增 tests/test_rolling_transcribe.py（15 項＋1 項真實模型測試），真實模型測試待電腦閒置時執行；tests/test_pause.py 以 rolling 模式重跑的真實子程序測試尚未完成 |
 
 T100.6 的測試涵蓋：
 

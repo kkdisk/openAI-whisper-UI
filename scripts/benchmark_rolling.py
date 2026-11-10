@@ -35,6 +35,7 @@ from app.rolling import (
     context_prompt,
     iter_audio_blocks,
     iter_pcm,
+    with_last,
 )
 from app.schemas import JobRequest
 from scripts.runtime_stats import memory_snapshot
@@ -57,19 +58,6 @@ def parse_run(spec: str) -> dict:
     if block <= 0:
         raise ValueError("block 秒數須大於 0")
     return {"name": f"rolling-{value}", "mode": "rolling", "block_sec": block}
-
-
-def with_last(iterable):
-    """多看一個元素以得知是否為最後一個；分段時用來決定是否裁切結尾。"""
-    iterator = iter(iterable)
-    try:
-        current = next(iterator)
-    except StopIteration:
-        return
-    for following in iterator:
-        yield current, False
-        current = following
-    yield current, True
 
 
 def char_count(rows) -> int:

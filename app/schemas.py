@@ -82,6 +82,7 @@ class Continuation(BaseModel):
     prior_paused_sec: float = 0
     prior_actual_device: str | None = None
     source_check: Literal["pending", "sha256", "size_duration"] = "pending"
+    segmentation: Literal["whole", "rolling"] = "whole"
 
 
 class TranscriptSegment(BaseModel):
@@ -139,6 +140,11 @@ class JobMeta(BaseModel):
     fallback_reason: str | None = None
     source_sha256: str | None = None
     continuations: list[Continuation] = Field(default_factory=list)
+    # 舊任務沒有這些欄位時視為整段辨識。
+    segmentation: Literal["whole", "rolling"] = "whole"
+    block_sec: float | None = None
+    boundaries_sec: list[float] = Field(default_factory=list)
+    detected_language: str | None = None
 
 
 class AppError(Exception):

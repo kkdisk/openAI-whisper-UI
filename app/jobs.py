@@ -228,6 +228,7 @@ class JobManager:
                 prior_active_elapsed_sec=meta.active_elapsed_sec,
                 prior_paused_sec=meta.paused_sec,
                 prior_actual_device=meta.actual_device,
+                segmentation=self.settings.segmentation,
             )
             meta.continuations.append(record)
             meta.status = Status.UPLOADING
@@ -332,6 +333,8 @@ class JobManager:
         cancel, gate = ctx.Event(), ctx.Event()
         pause, sequence = ctx.Event(), ctx.Value("q", 0)
         meta = self.metas[job_id]
+        meta.segmentation = self.settings.segmentation
+        meta.block_sec = self.settings.block_sec if meta.segmentation == "rolling" else None
         args = (self.directory(job_id) / "media.upload", request, self.settings)
         process = ctx.Process(
             target=worker_entry,
@@ -424,6 +427,20 @@ class JobManager:
                         if stage not in order or order.index(stage) < order.index(meta.status):
                             raise ValueError("工作階段順序異常")
                         meta.status = stage
+                        self.save(meta)
+                    elif kind == "block":
+                        offset = float(payload["offset_sec"])
+                        # 首塊起點是檔頭或續跑接縫，不是切點。
+                        if payload["index"] > 0 and offset not in meta.boundaries_sec:
+                            meta.boundaries_sec.append(offset)
+                        if payload.get("forced_cut"):
+                            end = offset + float(payload["duration_sec"])
+                            meta.warnings.append(f"boundary_forced@{end:.1f}")
+                        if payload.get("locked_language"):
+                            meta.detected_language = payload["locked_language"]
+                        self.save(meta)
+                    elif kind == "warning":
+                        meta.warnings.append(str(payload["code"])[:200])
                         self.save(meta)
                     elif kind == "info":
                         meta.duration_sec = payload["duration_sec"]

@@ -133,6 +133,35 @@ def orphan_parent(marker, bind, paused=False):
         time.sleep(0.1)
 
 
+def rolling_events_transcribe(path, request, settings, emit, cancelled, resume=None):
+    """模擬分段路徑送出的 block／warning 事件，驗證主程序記錄。"""
+    emit("status", {"status": "transcribing"})
+    emit("info", {"duration_sec": None, "versions": {}, "model_revision": "test"})
+    for index, offset in enumerate((0.0, 598.5, 1201.0)):
+        emit(
+            "segment",
+            {
+                "segment_id": index + 1,
+                "start_sec": offset,
+                "end_sec": offset + 1,
+                "raw_text": f"原{index}",
+                "text": f"文{index}",
+            },
+        )
+        emit(
+            "block",
+            {
+                "index": index,
+                "offset_sec": offset,
+                "duration_sec": 598.5 if index == 0 else 602.5,
+                "forced_cut": index == 1,
+                "locked_language": "zh" if index == 0 else None,
+            },
+        )
+    emit("warning", {"code": "timestamp_adjusted@2:599.00-603.00"})
+    emit("info", {"duration_sec": 1300.0, "versions": {}, "model_revision": "test"})
+
+
 def resumable_transcribe(path, request, settings, emit, cancelled, resume=None):
     """首次產生 0～3 秒三段；續跑時自 from_sec 接續，並記錄收到的 resume。"""
     import json

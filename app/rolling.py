@@ -143,16 +143,30 @@ def iter_audio_blocks(
     cancelled=lambda: False,
     min_gap_sec: float = 0.3,
     speech_fn: SpeechFn = silero_speech,
+    start_sec: float = 0.0,
+    stats: dict | None = None,
 ) -> Iterator[AudioBlock]:
-    """串流切塊；緩衝上限約為 block_sec 加上一塊的殘餘，與總長無關。"""
+    """串流切塊；緩衝上限約為 block_sec 加上一塊的殘餘，與總長無關。
+
+    start_sec 之前的樣本只計數不保留（H50a 續跑）；offset 仍以原檔為準。
+    stats 若提供，會持續更新 total_samples（全檔樣本數，含 start_sec 之前）。
+    """
     block = int(block_sec * SAMPLE_RATE)
     search = int(search_sec * SAMPLE_RATE)
     if not 0 < search < block:
         raise ValueError("search_sec 須大於 0 且小於 block_sec")
+    start = max(0, int(round(start_sec * SAMPLE_RATE)))
+    stats = stats if stats is not None else {}
+    stats["total_samples"] = 0
     pending: list[np.ndarray] = []
     buffered = 0
-    offset = 0
+    offset = start
     for array in iter_pcm(path, max_duration_sec, cancelled):
+        total = stats["total_samples"]
+        stats["total_samples"] = total + array.size
+        if total + array.size <= start:
+            continue
+        array = array[max(0, start - total) :]
         pending.append(array)
         buffered += array.size
         while buffered >= block:
@@ -165,6 +179,37 @@ def iter_audio_blocks(
             pending, buffered = [buffer[split:]], buffer.size - split
     if buffered:
         yield AudioBlock(offset, np.concatenate(pending), False)
+
+
+def declared_duration(path: Path) -> float | None:
+    """容器宣告的音軌時長；未宣告或無法讀取時回傳 None，不代表實際長度。"""
+    import av
+
+    try:
+        with av.open(str(path)) as container:
+            if not container.streams.audio:
+                return None
+            stream = container.streams.audio[0]
+            if stream.duration and stream.time_base:
+                return float(stream.duration * stream.time_base)
+            if container.duration:
+                return container.duration / av.time_base
+    except Exception:
+        return None
+    return None
+
+
+def with_last(iterable):
+    """多看一個元素以得知是否為最後一個；分段時用來決定是否裁切結尾。"""
+    iterator = iter(iterable)
+    try:
+        current = next(iterator)
+    except StopIteration:
+        return
+    for following in iterator:
+        yield current, False
+        current = following
+    yield current, True
 
 
 # --- 每塊辨識的規則（計畫書 3.4）；純函式，R2 整合時沿用 --------------------

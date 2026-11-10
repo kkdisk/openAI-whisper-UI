@@ -155,7 +155,8 @@ def create_app(settings: Settings | None = None, manager: JobManager | None = No
         return {
             "csrf": csrf,
             "max_upload_bytes": settings.max_upload_bytes,
-            "max_duration_sec": settings.max_duration_sec,
+            "max_duration_sec": settings.effective_max_duration_sec,
+            "segmentation": settings.segmentation,
         }
 
     @app.get("/api/models")

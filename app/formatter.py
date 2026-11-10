@@ -122,6 +122,11 @@ def export(meta: JobMeta, segments: list[TranscriptSegment], fmt: str, raw: bool
         f"語言：{meta.request.language}；轉換：{meta.conversion}\n"
         f"參考前文：{'開啟' if meta.request.condition_on_previous_text else '關閉'}\n"
     )
+    if meta.segmentation == "rolling":
+        info += (
+            f"分段辨識：rolling，區塊約 {meta.block_sec:g} 秒，切點 {len(meta.boundaries_sec)} 個；"
+            "切點附近請回聽確認\n"
+        )
     checks = {
         "sha256": "已以指紋核對來源",
         "size_duration": "僅核對大小與時長，未以指紋驗證",
