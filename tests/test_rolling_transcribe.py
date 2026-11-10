@@ -296,3 +296,42 @@ def test_real_model_rolling_blocks(tmp_path):
     assert all(s["start_sec"] <= s["end_sec"] for s in segments)
     assert max(s["end_sec"] for s in segments) > 50
     (tmp_path / "events.json").write_text(json.dumps(events, ensure_ascii=False), "utf-8")
+
+
+def test_segments_starting_after_block_end_are_flagged(tmp_path, engine):
+    events = run(tmp_path, rolling())
+    segments = of(events, "segment")
+    outside = [s for s in segments if s["outside_audio"]]
+    assert {s["raw_text"] for s in outside} == {"越界"} and len(outside) == 3
+    assert not any(s["outside_audio"] for s in segments if s["raw_text"] != "越界")
+
+
+def test_outside_audio_excluded_from_revised_but_kept_raw(tmp_path):
+    from app.revisions import RevisionRow, RevisionState, revised_segments
+    from app.schemas import TranscriptSegment
+
+    rows = [
+        TranscriptSegment(segment_id=1, start_sec=0, end_sec=1, raw_text="真", text="真"),
+        TranscriptSegment(
+            segment_id=2, start_sec=1, end_sec=1, raw_text="幻", text="幻", outside_audio=True
+        ),
+        TranscriptSegment(segment_id=3, start_sec=1, end_sec=2, raw_text="續", text="續"),
+    ]
+    texts = lambda state: [s.text for s in revised_segments(rows, state)]  # noqa: E731
+    assert texts(RevisionState()) == ["真", "續"]
+    restored = RevisionState(rows=[RevisionRow(key="s:2", text="改過", deleted=False)])
+    assert texts(restored) == ["真", "改過", "續"]
+    removed = RevisionState(rows=[RevisionRow(key="s:2", text="幻", deleted=True)])
+    assert texts(removed) == ["真", "續"]
+    meta = JobMeta(job_id="a" * 32, request=JobRequest(source_name="a.wav", expected_bytes=1))
+    assert "幻" in export(meta, rows, "txt", raw=True)
+    assert "幻" not in export(meta, revised_segments(rows, RevisionState()), "srt")
+
+
+def test_legacy_segment_reads_without_flag():
+    from app.schemas import TranscriptSegment
+
+    row = TranscriptSegment.model_validate_json(
+        '{"segment_id":1,"start_sec":0,"end_sec":1,"raw_text":"a","text":"a"}'
+    )
+    assert row.outside_audio is False

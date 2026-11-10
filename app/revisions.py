@@ -106,7 +106,9 @@ def revised_segments(originals: list[TranscriptSegment], state: RevisionState):
     add_inserted(0)
     for original in originals:
         row = overrides.get(f"s:{original.segment_id}")
-        if row is None or not row.deleted:
+        # 無對應音訊的片段預設排除；只有使用者明確復原（有修訂且未刪除）才列入。
+        deleted = row.deleted if row else original.outside_audio
+        if not deleted:
             result.append(original.model_copy(update={"text": row.text}) if row else original)
         add_inserted(original.segment_id)
     return result

@@ -509,3 +509,30 @@ test("duration limit text follows the server setting",()=>{
   assert.equal(evaluate("durationText(10800)"),"3 小時");
   assert.equal(evaluate("durationText(7200+60*30)"),"150 分鐘");
 });
+
+test("outside-audio segments start deleted, stay out of copies and can be restored",async()=>{
+  const {evaluate}=setup();await seedEditor(evaluate,"transcribing");
+  evaluate(`append({segment_id:2,start_sec:5,end_sec:5,text:"幻覺",outside_audio:true});append({segment_id:3,start_sec:5,end_sec:8,text:"接續"});`);
+  assert.equal(evaluate("editedRows().map(r=>r.text).join('|')"),"original|接續");
+  const box=evaluate("editor.sourceNodes.get(2).children[1]");
+  const [input,tools]=box.children;
+  assert.equal(input.disabled,true);
+  const [remove]=tools.children;
+  assert.equal(remove.textContent,"復原刪除");
+  assert.match(tools.children[1].textContent,/自動排除/);
+  remove.onclick();
+  assert.equal(evaluate("editedRows().map(r=>r.text).join('|')"),"original|幻覺|接續");
+  assert.equal(evaluate("JSON.stringify(editor.dirty.get('s:2'))"),JSON.stringify({key:"s:2",anchor:0,text:"幻覺",deleted:false,start_sec:null,end_sec:null}));
+});
+
+test("warnings are summarized in plain language with positions",async()=>{
+  const {evaluate}=setup();await seedEditor(evaluate,"transcribing");
+  evaluate(`append({segment_id:2,start_sec:5023.47,end_sec:5023.47,text:"x",outside_audio:true});append({segment_id:3,start_sec:5023.47,end_sec:5023.47,text:"y",outside_audio:true});`);
+  const text=evaluate(`warningSummary(["timestamp_adjusted@1:582.59-583.59","timestamp_adjusted@2:583.59-584.59","timestamp_adjusted@3:584.59-600.59","boundary_forced@3487.1","something_else"])`);
+  assert.match(text,/有 3 段時間超出區塊/);
+  assert.match(text,/其中 2 段無對應音訊，已自動排除/);
+  assert.match(text,/01:23:43/);
+  assert.match(text,/1 處在連續說話中強制切塊：00:58:07/);
+  assert.match(text,/something_else/);
+  assert.doesNotMatch(text,/timestamp_adjusted/);
+});

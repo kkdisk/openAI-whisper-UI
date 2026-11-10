@@ -103,9 +103,27 @@ function showMeta(meta){
   const eta=meta.status==="transcribing"&&running&&done>=60&&activeElapsed>=10&&meta.duration_sec?time(Math.max(0,activeElapsed*(meta.duration_sec-meta.last_position_sec)/done)):running?"估算中":"暫停估算";
   $("timing").textContent=`已保存位置 ${time(meta.last_position_sec)} / ${time(meta.duration_sec)} · ${runStart(meta)?"本次續跑":"總"}耗時 ${time(meta.elapsed_sec)} · 活動 ${time(activeElapsed)} · 暫停 ${time(meta.paused_sec??0)} · 剩餘 ${terminal.has(meta.status)?"—":eta}（估計）`;
   $("status").textContent+=` · 選擇 ${meta.request.device||"cpu"} · 實際 ${meta.actual_device||(meta.request.device&&meta.request.device!=="cpu"?"待確認":"cpu")} / ${meta.compute_type||"int8"}${meta.actual_device_index!=null?" · GPU "+meta.actual_device_index:""}${meta.fallback_reason?" · 已回退 CPU（"+meta.fallback_reason+"）":""}`;
-  if(meta.error)message(meta.error);else if(meta.warnings.length)message(meta.warnings.join("\n"));
+  if(meta.error)message(meta.error);else if(meta.warnings.length)message(warningSummary(meta.warnings));
   document.querySelectorAll("[data-format]").forEach(b=>b.disabled=false);
   $("copy").disabled=!editedRows().length;updateButtons();
+}
+function warningSummary(warnings){
+  const byId=new Map(rows.map(row=>[row.segment_id,row]));
+  const adjusted=[],forced=[],other=[];
+  for(const code of warnings){
+    const id=/^timestamp_adjusted@(\d+):/.exec(code),cut=/^boundary_forced@([\d.]+)/.exec(code);
+    if(id)adjusted.push(Number(id[1]));
+    else if(cut)forced.push(Number(cut[1]));
+    else other.push(code.startsWith("source_duration_mismatch")?"續跑來源的實際音軌長度與原任務略有差異，請確認是同一檔案。":code);
+  }
+  const lines=[];
+  if(adjusted.length){
+    const excluded=adjusted.filter(id=>byId.get(id)?.outside_audio).length;
+    const times=[...new Set(adjusted.map(id=>byId.get(id)).filter(Boolean).map(row=>time(row.start_sec)))];
+    lines.push(`分段切點附近有 ${adjusted.length} 段時間超出區塊，已調整${excluded?`；其中 ${excluded} 段無對應音訊，已自動排除（可在逐字稿中復原）`:""}。${times.length?`位置：${times.slice(0,6).join("、")}${times.length>6?" 等":""}。`:""}請回聽確認。`);
+  }
+  if(forced.length)lines.push(`有 ${forced.length} 處在連續說話中強制切塊：${forced.slice(0,6).map(time).join("、")}${forced.length>6?" 等":""}，請回聽確認。`);
+  return [...lines,...other].join("\n");
 }
 function append(row){
   if(row.segment_id<=lastId)return;
@@ -160,7 +178,7 @@ function editControls(original,inserted=null){
   const box=document.createElement("div");box.className="segment-editor";
   const input=document.createElement("textarea");input.rows=2;input.maxLength=12000;
   input.setAttribute?.("aria-label",inserted?"新增語句":"修訂語句");
-  let value=editor.map.get(key)||{key,anchor:0,text:original.text,deleted:false,start_sec:null,end_sec:null};
+  let value=editor.map.get(key)||{key,anchor:0,text:original.text,deleted:!!original?.outside_audio&&!inserted,start_sec:null,end_sec:null};
   input.value=value.text;input.disabled=value.deleted;
   const tools=document.createElement("div");tools.className="edit-tools";
   const remove=document.createElement("button");remove.type="button";remove.className="secondary";
@@ -169,6 +187,7 @@ function editControls(original,inserted=null){
   input.oninput=()=>change({text:input.value});
   remove.onclick=()=>{change({deleted:!value.deleted});input.disabled=value.deleted;remove.textContent=value.deleted?"復原刪除":"刪除語句";};
   tools.append(remove);
+  if(!inserted&&original.outside_audio){const note=document.createElement("span");note.className="hint outside-note";note.textContent="此段起點超出分段音訊，可能是模型自行生成，已自動排除；回聽確認後可復原。";tools.append(note);}
   if(!inserted){
     const restore=document.createElement("button");restore.type="button";restore.className="secondary";restore.textContent="還原原文";
     restore.onclick=()=>{input.value=original.text;input.disabled=false;remove.textContent="刪除語句";change({text:original.text,deleted:false});};
@@ -213,11 +232,11 @@ async function insertSentence(anchor){
   finally{current.saving=null;current.inserting=false;$("copy").disabled=!editedRows().length;showSaveStatus();updateButtons();}
 }
 function editedRows(){
-  if(!editor?.ready)return rows;
+  if(!editor?.ready)return rows.filter(row=>!row.outside_audio);
   const result=[];
   const extras=anchor=>{for(const row of editor.map.values())if(row.key.startsWith("u:")&&row.anchor===anchor&&!row.deleted)result.push({...row,start_sec:row.start_sec??NaN});};
   extras(0);
-  for(const row of rows){const changed=editor.map.get(`s:${row.segment_id}`);if(!changed?.deleted)result.push({...row,text:changed?changed.text:row.text});extras(row.segment_id);}
+  for(const row of rows){const changed=editor.map.get(`s:${row.segment_id}`);if(!(changed?changed.deleted:row.outside_audio))result.push({...row,text:changed?changed.text:row.text});extras(row.segment_id);}
   return result;
 }
 async function selectJob(id){

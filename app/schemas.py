@@ -92,6 +92,9 @@ class TranscriptSegment(BaseModel):
     end_sec: float
     raw_text: str
     text: str
+    # 分段辨識時，片段起點已超出本塊音訊：多為模型在塊尾補白處自行生成。
+    # 原稿保留；修訂稿預設排除，使用者可復原。
+    outside_audio: bool = False
 
 
 class ErrorResponse(BaseModel):

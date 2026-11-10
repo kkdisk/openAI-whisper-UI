@@ -202,13 +202,14 @@ def run_info(directory, duration_sec):
     }
 
 
-def segment_payload(segment_id, start, end, text, request):
+def segment_payload(segment_id, start, end, text, request, outside_audio=False):
     return TranscriptSegment(
         segment_id=segment_id,
         start_sec=start,
         end_sec=end,
         raw_text=text.strip(),
         text=convert_text(text.strip(), request.traditional),
+        outside_audio=outside_audio,
     ).model_dump()
 
 
@@ -263,7 +264,8 @@ def _transcribe_rolling(model, directory, path, request, settings, emit, cancell
             opts["initial_prompt"] = context_prompt(
                 base_prompt, previous_text, encode, settings.prev_context_tokens
             )
-        next_offset = None if last else block.offset_sec + len(block.audio) / 16000
+        block_length = len(block.audio) / 16000
+        next_offset = None if last else block.offset_sec + block_length
         segments, info = model.transcribe(block.audio, **opts)
         texts = []
         for segment in controlled_segments(segments, cancelled):
@@ -277,7 +279,11 @@ def _transcribe_rolling(model, directory, path, request, settings, emit, cancell
                     "warning",
                     {"code": f"timestamp_adjusted@{next_id}:{segment.start:.2f}-{segment.end:.2f}"},
                 )
-            emit("segment", segment_payload(next_id, start, end, segment.text, request))
+            outside = bool(segment.start >= block_length)
+            emit(
+                "segment",
+                segment_payload(next_id, start, end, segment.text, request, outside),
+            )
             texts.append(segment.text.strip())
             next_id += 1
         if cancelled():
