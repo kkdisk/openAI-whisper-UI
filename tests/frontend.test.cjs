@@ -502,3 +502,10 @@ test("remaining time after a continuation uses only this run's progress",()=>{
   assert.match(elements.get("timing").textContent,/剩餘 04:50:00/);
   assert.match(elements.get("timing").textContent,/本次續跑耗時/);
 });
+
+test("duration limit text follows the server setting",()=>{
+  const {evaluate}=setup();
+  assert.equal(evaluate("durationText(43200)"),"12 小時");
+  assert.equal(evaluate("durationText(10800)"),"3 小時");
+  assert.equal(evaluate("durationText(7200+60*30)"),"150 分鐘");
+});

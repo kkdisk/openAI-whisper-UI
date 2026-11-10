@@ -380,9 +380,11 @@ if(typeof window!=="undefined")window.addEventListener("beforeunload",event=>{if
 $("refresh").onclick=()=>history().catch(e=>message(e.message));$("more").onclick=()=>history(true).catch(e=>message(e.message));
 $("file").onchange=()=>{const file=$("file").files[0];if(file)$("fileInfo").textContent=`${file.name} · ${(file.size/1024**2).toFixed(1)} MiB`;};
 const zone=$("dropzone");zone.ondragover=e=>{e.preventDefault();zone.classList.add("over");};zone.ondragleave=()=>zone.classList.remove("over");zone.ondrop=e=>{e.preventDefault();zone.classList.remove("over");if(e.dataTransfer.files.length!==1){message("請一次選擇一個檔案。");return;}$("file").files=e.dataTransfer.files;$("file").onchange();};
+function durationText(seconds){ return seconds%3600===0?`${seconds/3600} 小時`:`${Math.round(seconds/60)} 分鐘`; }
 async function init(){
   const ticket=generation;
   const config=await api("/api/session");csrf=config.csrf;
+  $("durationLimit").textContent=durationText(config.max_duration_sec);
   const models=await api("/api/models");$("model").replaceChildren();
   for(const model of models){const option=document.createElement("option");option.value=model.name;option.textContent=`${model.name} · ${model.ready?"已準備":"未準備"}`;option.disabled=!model.ready;$("model").append(option);}
   modelsReady=models.some(m=>m.ready);if(models.find(m=>m.name==="small").ready)$("model").value="small";

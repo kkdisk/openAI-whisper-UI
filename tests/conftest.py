@@ -25,6 +25,12 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
+def whole_segmentation_default(monkeypatch):
+    """既有測試以整段辨識為前提；rolling 預設另以專門測試驗證。"""
+    monkeypatch.setenv("WHISPER_SEGMENTATION", "whole")
+
+
+@pytest.fixture(autouse=True)
 def block_network(monkeypatch):
     original = socket.socket.connect
 

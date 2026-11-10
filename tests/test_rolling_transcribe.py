@@ -211,8 +211,10 @@ def test_settings_validation(monkeypatch):
         Settings(block_sec=10, boundary_search_sec=10)
     assert Settings().effective_max_duration_sec == 180 * 60
     assert rolling().effective_max_duration_sec == 12 * 3600
-    monkeypatch.setenv("WHISPER_SEGMENTATION", "rolling")
-    assert Settings().segmentation == "rolling"
+    monkeypatch.delenv("WHISPER_SEGMENTATION")
+    assert Settings().segmentation == "rolling"  # 產品預設
+    monkeypatch.setenv("WHISPER_SEGMENTATION", "whole")
+    assert Settings().segmentation == "whole"
 
 
 # --- 主程序記錄與匯出 ---------------------------------------------------------

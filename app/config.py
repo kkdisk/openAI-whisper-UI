@@ -19,8 +19,8 @@ MODEL_REPOS = {
 
 
 def _segmentation_default() -> str:
-    # R2 期間預設整段；開發驗證可設 WHISPER_SEGMENTATION=rolling 啟用分段辨識。
-    return os.environ.get("WHISPER_SEGMENTATION", "whole")
+    # 2026-11-10 起依使用者要求預設分段；設 WHISPER_SEGMENTATION=whole 可退回整段辨識。
+    return os.environ.get("WHISPER_SEGMENTATION", "rolling")
 
 
 @dataclass(frozen=True)
