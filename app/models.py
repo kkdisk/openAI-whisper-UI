@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from app.config import MODEL_REPOS, TRANSCRIPTION_MODELS, Settings
+from app.config import CPU_SLOW_MODELS, MODEL_REPOS, TRANSCRIPTION_MODELS, Settings
 from app.schemas import AppError
 
 
@@ -44,9 +44,10 @@ def model_path(settings: Settings, name: str, require_ready: bool = True) -> Pat
 def list_models(settings: Settings) -> list[dict]:
     rows = []
     for name in TRANSCRIPTION_MODELS:
+        row = {"name": name, "cpu_slow": name in CPU_SLOW_MODELS}
         try:
             model_path(settings, name)
-            rows.append({"name": name, "ready": True, "message": "已準備"})
+            rows.append({**row, "ready": True, "message": "已準備"})
         except AppError as exc:
-            rows.append({"name": name, "ready": False, "message": exc.message})
+            rows.append({**row, "ready": False, "message": exc.message})
     return rows

@@ -2,7 +2,12 @@
 
 Windows 本機 Web UI，使用 faster-whisper CPU INT8 或 NVIDIA GPU 辨識中文及英文專有名詞。主要輸出帶時間戳 TXT 與附 AI 整理指示的 Markdown，另可下載 SRT。音檔及文字不會由本工具上傳外部服務。
 
-目前版本：**v0.6.1**。v0.6.1 修正如下：
+目前版本：**v0.7.0**。v0.7.0 新增如下：
+
+- **Breeze-ASR-25 模型**：MediaTek 針對台灣華語與中英夾雜微調的模型，以 `prepare_models.py --model breeze-asr-25` 準備。五分鐘合成中英測試的錯誤率遠低於 turbo，但在 CPU 上約需錄音長度的 4.7 倍時間，建議搭配 NVIDIA GPU。選用時若裝置為 CPU 或自動，UI 會顯示速度警告。尚未用真實會議錄音驗收。
+- 比較工具 `benchmark_transcription.py` 新增 `--language`。
+
+v0.6.1 修正如下：
 
 - 分段辨識時，起點超出區塊音訊的片段（多為模型在塊尾自行生成）會在修訂稿 TXT／MD／SRT 與複製逐字稿中預設排除。原稿與原始 TXT 仍保留這些片段，使用者可在逐字稿中復原。
 - 這類片段不再帶入下一塊的前文提示。
@@ -144,11 +149,21 @@ uv sync --locked --group dev
 .\.venv\Scripts\python.exe scripts\prepare_models.py --model small --revision 536b0662742c02347bc0e980a01041f333bce120
 ```
 
-需要其他模型時將 `--model` 改成 `base`、`medium` 或 `large-v3-turbo`。模型準備期間請停止轉錄服務；不要同時更新正在使用的模型。日常 `start.bat` 不會執行安裝、更新或模型下載。
+需要其他模型時將 `--model` 改成 `base`、`medium`、`large-v3-turbo` 或 `breeze-asr-25`。模型準備期間請停止轉錄服務；不要同時更新正在使用的模型。日常 `start.bat` 不會執行安裝、更新或模型下載。
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\prepare_models.py --model large-v3-turbo
 ```
+
+#### Breeze-ASR-25（台灣華語／中英夾雜）
+
+```powershell
+.\.venv\Scripts\python.exe scripts\prepare_models.py --model breeze-asr-25
+```
+
+[MediaTek Breeze-ASR-25](https://huggingface.co/MediaTek-Research/Breeze-ASR-25) 由 Whisper large-v2 微調，授權 Apache-2.0。官方只提供 transformers 格式，因此本工具使用社群的 CTranslate2 float16 轉檔 `SoybeanMilk/faster-whisper-Breeze-ASR-25`（約 3 GB）。本工具未自行轉檔；已確認另外兩份獨立轉檔的 `model.bin` 雜湊與此相同。
+
+此模型參數量與 large-v2 相同（約 15 億），decoder 遠比 turbo 深，**在 CPU 上會非常慢**，建議搭配 NVIDIA GPU 使用。UI 選擇此模型且裝置為 CPU 或自動時會顯示提醒。在五分鐘合成中英測試音檔上，Breeze 的中文 CER 約 5%、英文 WER 約 1%，turbo 分別約 19% 和 61%（turbo 漏掉一半英文段落）。但 Breeze 在 CPU 上約需錄音長度的 4.7 倍時間，turbo 約 1.4 倍。詳見[驗證紀錄](tasks/validation.md)。尚未用真實會議錄音驗收。
 
 UI 列出所有支援模型；未備妥的模型顯示「未準備」且不可選。新增模型支援的程式更新後，需停止／重新啟動服務並重新整理頁面。turbo 目前同樣使用 CPU INT8，不代表已加入 NVIDIA GPU 模式，也沒有本機加速倍數保證；長會議前先測短片段。
 

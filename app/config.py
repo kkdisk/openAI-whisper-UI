@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal, get_args
 
 ROOT = Path(__file__).resolve().parent.parent
-ModelName = Literal["base", "small", "medium", "large-v3-turbo"]
+ModelName = Literal["base", "small", "medium", "large-v3-turbo", "breeze-asr-25"]
 TRANSCRIPTION_MODELS = get_args(ModelName)
 SEGMENTATION_MODES = ("whole", "rolling")
 MODEL_REPOS = {
@@ -15,7 +15,14 @@ MODEL_REPOS = {
     "small": "Systran/faster-whisper-small",
     "medium": "Systran/faster-whisper-medium",
     "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    # MediaTek Breeze-ASR-25（Whisper large-v2 微調，Apache-2.0）的社群 CTranslate2 float16 轉檔。
+    # 2026-11-17 查核：此 repo 與 phate334/Breeze-ASR-25-ct2、shdennlin/breeze-asr-25-ct2
+    # 三份獨立轉檔的 model.bin SHA-256 皆為 32110e9b…ed38。
+    "breeze-asr-25": "SoybeanMilk/faster-whisper-Breeze-ASR-25",
 }
+
+# 參數量大、CPU 推論極慢的模型；前端選用時提示改用 GPU。
+CPU_SLOW_MODELS = ("breeze-asr-25",)
 
 
 def _segmentation_default() -> str:

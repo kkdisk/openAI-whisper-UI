@@ -56,6 +56,12 @@ def main():
     )
     parser.add_argument("--terms", default="", help="只用於 terms_only 的簡短術語清單")
     parser.add_argument("--seed", type=int, help="每組開始前重設相同 CT2 隨機種子")
+    parser.add_argument(
+        "--language",
+        choices=("auto", "zh", "en", "mixed"),
+        default="auto",
+        help="與 UI 語言選項相同；預設 auto 以維持既有比較結果可重現",
+    )
     args = parser.parse_args()
     directory = model_path(Settings(), args.model)
     if not args.audio.is_file():
@@ -78,7 +84,9 @@ def main():
     decode_sec = time.perf_counter() - decode_start
     options = transcription_options(
         JobRequest(
-            source_name=args.audio.name, expected_bytes=args.audio.stat().st_size, language="auto"
+            source_name=args.audio.name,
+            expected_bytes=args.audio.stat().st_size,
+            language=args.language,
         )
     )
     try:

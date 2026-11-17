@@ -536,3 +536,13 @@ test("warnings are summarized in plain language with positions",async()=>{
   assert.match(text,/something_else/);
   assert.doesNotMatch(text,/timestamp_adjusted/);
 });
+
+test("cpu-slow model warns unless the GPU is explicitly chosen",()=>{
+  const {evaluate} = setup();
+  evaluate(`cpuSlowModels=new Set(["breeze-asr-25"]);`);
+  const warn=(model,device)=>evaluate(`$("model").value=${JSON.stringify(model)};$("device").value=${JSON.stringify(device)};$("device").onchange();$("modelWarning").textContent`);
+  assert.match(warn("breeze-asr-25","cpu"),/CPU 上會非常慢/);
+  assert.match(warn("breeze-asr-25","auto"),/找不到可用 GPU/);
+  assert.equal(warn("breeze-asr-25","cuda"),"");
+  assert.equal(warn("small","cpu"),"");
+});

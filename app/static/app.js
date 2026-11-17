@@ -399,15 +399,25 @@ if(typeof window!=="undefined")window.addEventListener("beforeunload",event=>{if
 $("refresh").onclick=()=>history().catch(e=>message(e.message));$("more").onclick=()=>history(true).catch(e=>message(e.message));
 $("file").onchange=()=>{const file=$("file").files[0];if(file)$("fileInfo").textContent=`${file.name} · ${(file.size/1024**2).toFixed(1)} MiB`;};
 const zone=$("dropzone");zone.ondragover=e=>{e.preventDefault();zone.classList.add("over");};zone.ondragleave=()=>zone.classList.remove("over");zone.ondrop=e=>{e.preventDefault();zone.classList.remove("over");if(e.dataTransfer.files.length!==1){message("請一次選擇一個檔案。");return;}$("file").files=e.dataTransfer.files;$("file").onchange();};
+let cpuSlowModels=new Set();
+function updateModelWarning(){
+  const model=$("model").value,device=$("device").value||"auto";
+  $("modelWarning").textContent=!cpuSlowModels.has(model)||device==="cuda"?"":
+    device==="cpu"?`${model} 在 CPU 上會非常慢（可能數倍於錄音長度），建議改用 NVIDIA GPU。`:
+    `${model} 若找不到可用 GPU 而以 CPU 執行，會非常慢（可能數倍於錄音長度）。`;
+}
+$("model").onchange=updateModelWarning;$("device").onchange=updateModelWarning;
 function durationText(seconds){ return seconds%3600===0?`${seconds/3600} 小時`:`${Math.round(seconds/60)} 分鐘`; }
 async function init(){
   const ticket=generation;
   const config=await api("/api/session");csrf=config.csrf;
   $("durationLimit").textContent=durationText(config.max_duration_sec);
   const models=await api("/api/models");$("model").replaceChildren();
+  cpuSlowModels=new Set(models.filter(m=>m.cpu_slow).map(m=>m.name));
   for(const model of models){const option=document.createElement("option");option.value=model.name;option.textContent=`${model.name} · ${model.ready?"已準備":"未準備"}`;option.disabled=!model.ready;$("model").append(option);}
   modelsReady=models.some(m=>m.ready);if(models.find(m=>m.name==="small").ready)$("model").value="small";
-  $("modelHelp").textContent=modelsReady?"small 為預設；medium／large-v3-turbo 請先以短片段比較品質、耗時與記憶體。":"尚無可用模型。請先依 README 執行 prepare_models.py，再重新整理頁面。";
+  $("modelHelp").textContent=modelsReady?"small 為預設；medium／large-v3-turbo／breeze-asr-25 請先以短片段比較品質、耗時與記憶體。breeze-asr-25 針對台灣華語與中英夾雜。":"尚無可用模型。請先依 README 執行 prepare_models.py，再重新整理頁面。";
+  updateModelWarning();
   await history();await restoreWorkspace(ticket);updateButtons();
   setInterval(refreshActive,2000);
 }

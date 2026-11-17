@@ -43,3 +43,13 @@ def test_model_alias_or_remote_path_not_accepted():
     for model in ("turbo", "../../model", "https://example.test/model"):
         with pytest.raises(ValidationError):
             JobRequest(source_name="test.mp4", expected_bytes=1, model=model)
+
+
+def test_breeze_is_listed_and_flagged_cpu_slow(tmp_path):
+    rows = {row["name"]: row for row in list_models(Settings(root=tmp_path))}
+    assert MODEL_REPOS["breeze-asr-25"] == "SoybeanMilk/faster-whisper-Breeze-ASR-25"
+    assert rows["breeze-asr-25"]["cpu_slow"] is True
+    assert not rows["breeze-asr-25"]["ready"]
+    assert not any(row["cpu_slow"] for name, row in rows.items() if name != "breeze-asr-25")
+    request = JobRequest(source_name="test.mp4", expected_bytes=1, model="breeze-asr-25")
+    assert request.model == "breeze-asr-25"

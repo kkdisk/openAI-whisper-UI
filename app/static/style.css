@@ -185,6 +185,8 @@ small { margin-top: 7px; }
 .step-number { display: inline-grid; place-items: center; width: 23px; height: 23px; border-radius: 6px; background: var(--surface-subtle); color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .form-section > label:last-child { margin-bottom: 0; }
 .model-help { margin: -6px 0 16px; font-size: 11px; }
+.model-warning { margin: -6px 0 16px; padding: 6px 9px; border: 1px solid var(--warning-border); border-radius: 6px; background: var(--warning-surface); color: var(--warning-ink); font-size: 11px; }
+.model-warning:empty { display: none; }
 .check { display: flex; align-items: flex-start; gap: 8px; font-weight: 400; line-height: 1.7; }
 .check input { flex: 0 0 15px; width: 15px; height: 15px; min-height: 0; padding: 0; margin: 3px 0 0; accent-color: var(--accent); }
 .dropzone { padding: 20px 12px 14px; margin: 0; text-align: center; border: 1px dashed var(--drop-border); border-radius: 9px; background: var(--drop-surface); color: var(--accent-hover); transition: border-color .15s, box-shadow .15s; }

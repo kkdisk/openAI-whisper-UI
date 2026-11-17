@@ -46,6 +46,7 @@
           <label>模型<select id="model"><option>檢查中…</option></select></label>
           <p id="modelHelp" class="hint model-help"></p>
           <label>運算裝置<select id="device"><option value="auto">自動（優先 GPU）</option><option value="cpu">CPU</option><option value="cuda">NVIDIA GPU</option></select></label>
+          <p id="modelWarning" class="hint model-warning" role="status"></p>
           <label>GPU 精度<select id="computeType"><option value="auto">自動</option><option value="int8_float16">INT8 / FP16</option><option value="float16">FP16</option></select></label>
           <p class="hint">自動模式在首段產生前可回退 CPU；指定 GPU 失敗會回報。CPU 使用 INT8。</p>
           <label>專有名詞<span class="optional">選填</span><textarea id="terms" rows="2" maxlength="4000" placeholder="CyteSi、GLT、API、產品型號"></textarea><small>作為辨識提示，非強制替換。完整提示上限 200 tokens，過長會提示縮短。</small></label>
