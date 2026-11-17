@@ -425,3 +425,4 @@ Git 初始化時，本機 main 追蹤 `https://github.com/kkdisk/openAI-whisper-
 - Breeze：16 個區塊全部輸出，沒有重複或幻覺。剩下的錯誤有「資料會如何」（應為資料匯入和）、「溫孔」、「原因」（應為原音）、`glt123`／`iqc2026`（應為 GLT-123／IQC-2026）。中文片段很短（102 段，turbo 26 段），而且多半沒有標點，閱讀時要自己斷句。
 - 速度：Breeze 在 CPU 上約需錄音長度的 4.7 倍時間（1 小時會議約 4.7 小時），turbo 約 1.4 倍。這只是單次結果，背景負載沒有控制。
 - 限制：這是合成語音，不是真實多人會議，也只跑了一次。尚未用 R02 或真實會議比較，也沒有測 GPU 速度、記憶體峰值，以及 rolling 模式下塊尾生成片段的行為。
+- R02（232.656 秒真實朗讀錄音）補跑：條件與先前 turbo／medium 比較相同（auto、CPU、8 執行緒、seed 42）。Breeze 中文引導 528 秒、無提示 666 秒（turbo 234／215、medium 432／314，較早跑的）。Breeze 改對「血液」「特異」「12 億 reads」等，但 4 處「試劑」全部聽成「設計」，中文引導組把 Abbott 聽成 AVID。AVITI、MAESTRO、CLIA 三個模型同樣錯。在這份錄音上沒有合成測試那樣明顯的領先，不據此改預設模型。詳見 `temp/r02-model-comparison/comparison.md`。
